@@ -1,0 +1,14 @@
+{
+  "name": "codebase-audit",
+  "version": "1.0.0",
+  "description": "Cold-start codebase audit skill for Claude Code",
+  "scripts": {
+    "test": "bun test test/skill-validation.test.ts",
+    "test:evals": "EVALS=1 bun test test/e2e.test.ts",
+    "test:all": "bun test && EVALS=1 bun test test/e2e.test.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "license": "MIT"
+}
