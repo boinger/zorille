@@ -14,8 +14,8 @@ Claude Code skill for cold-start codebase audits. This is a skill definition (ma
 ## Development
 
 ```bash
-bun test                    # Run structural validation tests
-bun run test:evals          # Run e2e eval tests (requires EVALS=1)
+bun test                    # Run all tests (structural + pattern + e2e)
+bun run test:evals          # Run only e2e eval tests (requires EVALS=1)
 ./setup                     # Install/update the skill symlink
 ```
 
