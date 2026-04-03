@@ -140,10 +140,47 @@ describe("Metadata files", () => {
     expect(fs.existsSync(path.join(ROOT, "README.md"))).toBe(true);
   });
 
+  test("CLAUDE.md exists", () => {
+    expect(fs.existsSync(path.join(ROOT, "CLAUDE.md"))).toBe(true);
+  });
+
+  test("ROADMAP.md exists", () => {
+    expect(fs.existsSync(path.join(ROOT, "ROADMAP.md"))).toBe(true);
+  });
+
   test("setup script exists and is executable", () => {
     const setupPath = path.join(ROOT, "setup");
     expect(fs.existsSync(setupPath)).toBe(true);
     const stats = fs.statSync(setupPath);
     expect(stats.mode & 0o111).toBeGreaterThan(0);
+  });
+});
+
+describe("Package.json scripts", () => {
+  const pkg = JSON.parse(
+    fs.readFileSync(path.join(ROOT, "package.json"), "utf-8"),
+  );
+
+  test("test script runs all tests, not a single file", () => {
+    expect(pkg.scripts.test).toBe("bun test");
+  });
+
+  test("test:evals script exists for gated e2e tests", () => {
+    expect(pkg.scripts["test:evals"]).toContain("EVALS=1");
+    expect(pkg.scripts["test:evals"]).toContain("e2e.test.ts");
+  });
+
+  test("no test:all script (redundant with widened test script)", () => {
+    expect(pkg.scripts["test:all"]).toBeUndefined();
+  });
+});
+
+describe("No empty scaffolding directories", () => {
+  test("test/fixtures does not exist", () => {
+    expect(fs.existsSync(path.join(ROOT, "test", "fixtures"))).toBe(false);
+  });
+
+  test("test/helpers does not exist", () => {
+    expect(fs.existsSync(path.join(ROOT, "test", "helpers"))).toBe(false);
   });
 });
