@@ -12,6 +12,12 @@ if [ -L "$SKILL_DIR" ] && [ "$(readlink "$SKILL_DIR")" = "$SOURCE_DIR" ]; then
   exit 0
 fi
 
+# Warn if symlink points to a different source
+if [ -L "$SKILL_DIR" ]; then
+  echo "WARNING: $SKILL_DIR currently points to $(readlink "$SKILL_DIR")"
+  echo "Replacing with $SOURCE_DIR"
+fi
+
 # Safety: don't overwrite a real directory
 if [ -d "$SKILL_DIR" ] && [ ! -L "$SKILL_DIR" ]; then
   echo "ERROR: $SKILL_DIR exists and is a real directory (not a symlink)."

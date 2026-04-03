@@ -8,7 +8,7 @@
     "test:all": "bun test && EVALS=1 bun test test/e2e.test.ts"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "^1.3.11"
   },
   "license": "MIT"
 }
