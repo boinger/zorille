@@ -121,7 +121,11 @@ describe("E2E: Quick-fix documentation completeness", () => {
     );
   });
 
-  test("quick-fix is suggested when not used but applicable", () => {
+  test("fix modes are suggested when not used but applicable", () => {
+    // Nudge when neither flag was used
+    expect(skillMd).toContain("--suggest-fixes` for inline fix diffs");
+    expect(skillMd).toContain("--quick-fix` to auto-apply the safe ones");
+    // Nudge when suggest-fixes was used but quick-fix was not
     expect(skillMd).toContain(
       "could be auto-applied with `/codebase-audit --quick-fix`",
     );
