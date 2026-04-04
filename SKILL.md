@@ -1,6 +1,6 @@
 ---
 name: codebase-audit
-version: 1.1.0
+version: 1.2.0
 description: |
   Full codebase audit. Analyzes an entire project cold, no diff, no branch context,
   producing a structured report covering bugs, security issues, architectural problems,
@@ -66,6 +66,11 @@ Detect the mode from arguments:
   - Quick: IGNORED (same rationale as `--suggest-fixes` — quick mode targets 2 minutes)
   - Future focused modes (`--security-only` etc.): YES (applies to scanned subset)
   - Future CI mode (`--ci`): IGNORED (CI wants pass/fail, not file modifications)
+- **Changed Only** (`--changed-only [ref]`): Scopes the audit to files changed since a git ref. Default ref: merge base of current branch against the default branch. Skips Phase 2 (architecture scan) and does not write a baseline (partial audits would corrupt regression tracking). Mode compatibility:
+  - Full flags (`--suggest-fixes`, `--quick-fix`): YES — applies to changed files
+  - Quick: IGNORED (changed-only is already fast)
+  - Regression: SKIP (no baseline to compare)
+  - Non-git repo: ERROR (requires git)
 
 ## Arguments
 
@@ -73,6 +78,9 @@ Detect the mode from arguments:
 - `/codebase-audit --quick` — quick smoke audit (2-min health check)
 - `/codebase-audit --suggest-fixes` — full audit with inline fix diffs per finding
 - `/codebase-audit --quick-fix` — full audit, then auto-apply high-confidence mechanical fixes
+- `/codebase-audit --changed-only` — audit files changed since branch diverged from default branch
+- `/codebase-audit --changed-only HEAD~5` — audit files changed in last 5 commits
+- `/codebase-audit --changed-only main` — audit files changed vs main
 
 ---
 
@@ -167,11 +175,49 @@ Based on codebase size from step 1.3:
 
 If in quick mode, stop after this phase. Jump to the Phase 3 quick-mode subset (top 10 `[QUICK]` patterns only), then skip to Phase 4 for the slim report.
 
+### 1.9 Changed-only file resolution
+
+Skip this step unless `--changed-only` is active. This step requires git — if not a git repo, error: "`--changed-only` requires a git repository" and stop.
+
+**Resolve the git ref:**
+
+If the user provided an explicit ref (e.g., `--changed-only main`, `--changed-only HEAD~5`):
+
+```bash
+git rev-parse --verify <ref> 2>/dev/null
+```
+
+If invalid, error: "Invalid git ref: `<ref>`" and stop.
+
+If no explicit ref (bare `--changed-only`):
+
+```bash
+DEFAULT_BRANCH=$(git remote show origin 2>/dev/null | grep 'HEAD branch' | sed 's/.*: //')
+[ -z "$DEFAULT_BRANCH" ] && DEFAULT_BRANCH="main"
+MERGE_BASE=$(git merge-base HEAD "$DEFAULT_BRANCH" 2>/dev/null)
+```
+
+If merge-base fails (e.g., no common ancestor, already on the default branch with no divergence), error and stop.
+
+**Get the changed file list:**
+
+```bash
+git diff --name-only --diff-filter=ACMR $REF...HEAD
+```
+
+`--diff-filter=ACMR` includes Added, Copied, Modified, and Renamed files. Deleted files are excluded (nothing to audit). Renamed files appear by their new name only, which is correct for auditing current state. Binary files may appear in the list — Grep will silently skip them, which is expected.
+
+If the list is empty: print "No files changed since `{ref}`. Nothing to audit." and exit gracefully.
+
+Print: "Auditing N files changed since `{ref}`"
+
+Store the file list for use in Phase 3. Skip Phase 1.8 (size-based strategy) — the scope is already defined by the changed file list.
+
 ---
 
 ## Phase 2: Architecture Scan
 
-Skip this phase entirely in quick mode.
+Skip this phase entirely in quick mode or if `--changed-only` is active (architecture scan is not meaningful for a scoped file set).
 
 ### 2.1 Map entry points and boundaries
 
@@ -234,6 +280,13 @@ Work through the checklist in priority order:
 7. **Performance** — N+1 queries, unbounded collections, missing indexes, large payloads
 
 For each checklist item: use Grep in `files_with_matches` mode (not `content` mode) to find which files match, then use Read to examine the specific lines for confirmation. Do not dump entire file contents into the conversation — use targeted reads of specific line ranges. Do not report a pattern match as a finding without reading the context — many patterns have legitimate uses.
+
+**If `--changed-only` is active:** Scope Grep to only the changed files from Phase 1.9.
+
+- **≤20 changed files**: Pass each file path to Grep's `path` parameter individually.
+- **>20 changed files**: Run Grep on the full codebase as normal, then filter results to only include files in the changed-only list. This avoids thousands of individual Grep calls.
+
+Binary files in the changed list will be silently skipped by Grep — this is expected and correct. Renamed files appear by their new name only.
 
 **Important:** Keep the conversation output concise. For checklist execution, use `files_with_matches` to identify candidate files, then Read specific line ranges. Never let a single Grep call return hundreds of lines of content into the conversation.
 
@@ -331,7 +384,11 @@ The report should contain:
 
 For quick mode, the slim report contains only: Header, Executive Summary, Project Profile, Health Score, Top 5 Findings.
 
+For `--changed-only` mode, add a **Scope** section after the Header showing the ref, file count, and file list. Include a note: "This is a scoped audit. Only changed files were analyzed. Run a full `/codebase-audit` for complete coverage." Skip Architecture Diagram and Churn Hotspots.
+
 ### 4.4 Write baseline JSON
+
+Skip baseline generation if `--changed-only` is active. Partial audit baselines would corrupt regression tracking against full audits.
 
 Write a companion `{datetime}-baseline.json` file in the same directory. This is used for regression comparison on future runs.
 
@@ -388,7 +445,9 @@ Run this for each finding and use the resulting hash as the `id` field. This ens
 
 ### 4.5 Regression comparison
 
-If a previous `baseline.json` exists in the same audits directory AND the current mode is full (not quick):
+Skip regression comparison if `--changed-only` is active (no baseline was written).
+
+If a previous `baseline.json` exists in the same audits directory AND the current mode is full (not quick, not changed-only):
 
 1. Load the most recent previous baseline
 2. Compare findings by their content-based IDs
@@ -413,10 +472,12 @@ After writing the report file, print a summary directly to the conversation. Thi
 6. **Regression delta** (if applicable): Score change, count of fixed/new findings
 7. **Fix Coverage** (if `--suggest-fixes`): "N of M findings have suggested fixes (X%)" — gives instant signal on how actionable the audit is
 8. **Quick Fix Preview** (if `--quick-fix`): "N fixes will be auto-applied in Phase 5 (M skipped: K review-suggested, J multi-file, L too large)" — tells the user what Phase 5 will do before it runs
-9. **Fix Mode Suggestion** — nudge the user toward fix features they didn't use:
-   - If neither `--suggest-fixes` nor `--quick-fix` was used and there are findings: "Tip: Run with `--suggest-fixes` for inline fix diffs, or `--quick-fix` to auto-apply the safe ones."
-   - If `--suggest-fixes` was used but `--quick-fix` was NOT, and there are `[HIGH CONFIDENCE]` single-file findings: "Tip: N of these findings could be auto-applied with `/codebase-audit --quick-fix`"
-   - If `--quick-fix` was used: no nudge needed (user already has both features active)
+9. **Scope** (if `--changed-only`): "Audited N files changed since {ref}" — reminds the user this was a scoped audit
+10. **Tips** — consolidated block at the end of the summary. Each tip fires at most once per audit. Only include tips that are relevant:
+    - If neither `--suggest-fixes` nor `--quick-fix` was used and there are findings: "Run with `--suggest-fixes` for inline fix diffs, or `--quick-fix` to auto-apply the safe ones."
+    - If `--suggest-fixes` was used but `--quick-fix` was NOT, and there are `[HIGH CONFIDENCE]` single-file findings: "N of these findings could be auto-applied with `/codebase-audit --quick-fix`"
+    - If this is a full audit (not `--changed-only`), on a non-default branch, with >20 findings: "Use `--changed-only` to audit only files changed on this branch."
+    - If no tips are applicable, omit the Tips block entirely.
 
 ### 4.7 Write the Fix Plan
 
@@ -615,6 +676,12 @@ Print:
 - **`--quick-fix` with zero eligible fixes**: All fixes were skipped (review-suggested, multi-file, too large, or stale). Print summary explaining why each was skipped and direct the user to the fix plan.
 - **`--quick-fix` on a dirty working tree**: Phase 5.1 checks `git status --porcelain`. If uncommitted changes exist, warn the user and ask whether to proceed (fixes will be mixed with existing changes) or abort Phase 5.
 - **`--quick-fix` in a non-git repo**: Skip the commit proposal (Phase 5.4). Apply fixes and print the summary only.
+- **`--changed-only` in a non-git repo**: ERROR — `--changed-only` requires git. Exit immediately with: "`--changed-only` requires a git repository."
+- **`--changed-only` with no changes**: "No files changed since `{ref}`. Nothing to audit." Exit gracefully with no report.
+- **`--changed-only` with invalid ref**: Error with the ref name and stop: "Invalid git ref: `{ref}`"
+- **`--changed-only` with `--quick`**: IGNORED. Note in report: "Changed-only mode is already fast — `--quick` flag was ignored."
+- **`--changed-only` with binary files in diff**: Grep silently skips binary files. This is expected — document in Phase 1.9 but do not treat as an error.
+- **`--changed-only` with renamed files**: `git diff --name-only` shows the new filename only, which is correct for auditing current state.
 
 ---
 
@@ -625,7 +692,7 @@ Print:
 3. Reports are saved to your home directory (`$AUDIT_HOME`), not the project directory. They may contain security findings — do not commit them to public repos.
 4. No hallucinating findings. Every finding must reference a specific file and line (or component for non-code findings). If you can't point to it, don't report it.
 5. Use the severity calibration definitions exactly as specified. Do not inflate or deflate severity.
-6. In quick mode, respect the 2-minute target. Do not run Phase 2 or the full Phase 3 checklist.
+6. In quick mode, respect the 2-minute target. Do not run Phase 2 or the full Phase 3 checklist. `--changed-only` also skips Phase 2 and does not write a baseline.
 7. AskUserQuestion fires in three places: (1) Phase 1 if >50K LOC, to scope the audit; (2) Phase 4.7 after the plan is written, to offer the next step; (3) Phase 5 (`--quick-fix` only) for dirty working tree check and commit proposal. Do not use AskUserQuestion elsewhere during the audit.
 8. All bash blocks are self-contained. Do not rely on shell variables persisting between code blocks.
 9. When reading files for context, read enough surrounding lines to understand the code — do not make judgments from a single line in isolation.

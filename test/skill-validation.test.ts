@@ -14,7 +14,7 @@ describe("Skill structure validation", () => {
   test("has valid YAML frontmatter", () => {
     expect(skillMd).toMatch(/^---\n/);
     expect(skillMd).toMatch(/\nname: codebase-audit\n/);
-    expect(skillMd).toMatch(/\nversion: 1\.1\.0\n/);
+    expect(skillMd).toMatch(/\nversion: 1\.2\.0\n/);
     expect(skillMd).toMatch(/\ndescription: \|/);
     expect(skillMd).toMatch(/\nallowed-tools:/);
   });
@@ -38,11 +38,26 @@ describe("Skill structure validation", () => {
     expect(skillMd).toContain("--quick");
     expect(skillMd).toContain("--suggest-fixes");
     expect(skillMd).toContain("--quick-fix");
+    expect(skillMd).toContain("--changed-only");
     expect(skillMd).toContain("Regression");
   });
 
   test("has Phase 5 for quick-fix", () => {
     expect(skillMd).toContain("## Phase 5: Quick Fix Application");
+  });
+
+  test("has changed-only file resolution step", () => {
+    expect(skillMd).toContain("### 1.9 Changed-only file resolution");
+  });
+
+  test("changed-only skips Phase 2", () => {
+    expect(skillMd).toContain("--changed-only` is active (architecture scan");
+  });
+
+  test("changed-only skips baseline generation", () => {
+    expect(skillMd).toContain(
+      "Skip baseline generation if `--changed-only` is active",
+    );
   });
 
   test("quick-fix implies suggest-fixes", () => {

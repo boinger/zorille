@@ -99,9 +99,8 @@ Filter output to only show findings at or above a severity threshold.
 
 Applies to both report output and exit codes (in `--ci` mode).
 
-### `--changed-only [ref]`
-Audit only files changed since a git ref (default: merge base of current branch).
-Bridges the gap between "full cold-start audit" and "PR review." Still uses the full checklist — just scoped to changed files.
+### `--changed-only [ref]` (shipped in v1.2.0)
+Scopes audit to files changed since a git ref (default: merge base). Skips Phase 2, no baseline. Pragmatic Grep threshold: ≤20 files individually, >20 files via full scan + filter.
 
 ---
 
@@ -126,11 +125,11 @@ This enables community-contributed domain-specific checklists without bloating t
 Rough implementation priority based on user value and complexity:
 
 1. ~~`--quick-fix` — natural extension of existing `--suggest-fixes`~~ **SHIPPED v1.1.0**
-2. Focused modes (`--security-only` etc.) — low complexity, high value
-3. `--ci` + `--json` — enables automation, often requested
-4. `--min-severity` — simple filter, useful with `--ci`
-5. `--plus-infra` — new scan surface, medium complexity
-6. `--changed-only` — useful but overlaps with PR review tools
+2. ~~`--changed-only` — scoped audit of changed files~~ **SHIPPED v1.2.0**
+3. Focused modes (`--security-only` etc.) — low complexity, high value
+4. `--ci` + `--json` — enables automation, often requested
+5. `--min-severity` — simple filter, useful with `--ci`
+6. `--plus-infra` — new scan surface, medium complexity
 7. `--plan-fixes` — refinement of existing plan output
 8. Expanded language patterns — ongoing, incremental
 9. Checklist plugins — nice-to-have, needs plugin discovery design

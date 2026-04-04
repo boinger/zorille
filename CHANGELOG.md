@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.2.0] - 2026-04-03
+
+### Features
+
+- **Changed-only mode** (`--changed-only [ref]`): Scopes audit to files changed since a git ref. Default: merge base of current branch against default branch. Override with explicit ref (`HEAD~5`, `main`, etc.).
+- Skips Phase 2 (architecture scan) and baseline generation for scoped audits
+- Pragmatic Grep threshold: ≤20 files individually, >20 files via full codebase scan with result filtering
+- Handles binary files (silently skipped) and renamed files (new name only)
+- Consolidated tips block in conversation summary for all mode nudges
+
 ## [1.1.0] - 2026-04-03
 
 ### Features

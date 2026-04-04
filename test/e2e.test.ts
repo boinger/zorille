@@ -139,3 +139,40 @@ describe("E2E: Quick-fix documentation completeness", () => {
     expect(template).toContain("Quick Fix Results");
   });
 });
+
+describe("E2E: Changed-only documentation completeness", () => {
+  const skillMd = fs.readFileSync(path.join(ROOT, "SKILL.md"), "utf-8");
+
+  test("changed-only uses git diff for file list", () => {
+    expect(skillMd).toContain("git diff --name-only --diff-filter=ACMR");
+  });
+
+  test("changed-only uses merge-base for default ref", () => {
+    expect(skillMd).toContain("git merge-base HEAD");
+  });
+
+  test("changed-only has >20 file threshold for grep strategy", () => {
+    expect(skillMd).toContain("20 changed files");
+  });
+
+  test("changed-only documents binary file handling", () => {
+    expect(skillMd).toContain(
+      "Binary files in the changed list will be silently skipped",
+    );
+  });
+
+  test("changed-only nudge exists for full audits", () => {
+    expect(skillMd).toContain(
+      "--changed-only` to audit only files changed on this branch",
+    );
+  });
+
+  test("report template supports changed-only scope section", () => {
+    const template = fs.readFileSync(
+      path.join(ROOT, "report-template.md"),
+      "utf-8",
+    );
+    expect(template).toContain("CHANGED_ONLY_SECTION");
+    expect(template).toContain("This is a scoped audit");
+  });
+});

@@ -10,8 +10,22 @@
 | **LOC** | {LOC} |
 | **Files** | {FILE_COUNT} |
 | **Test Files** | {TEST_FILE_COUNT} |
-| **Mode** | {MODE} (may include `--suggest-fixes`, `--quick-fix`) |
+| **Mode** | {MODE} (may include `--suggest-fixes`, `--quick-fix`, `--changed-only`) |
 | **Duration** | {DURATION} |
+
+{CHANGED_ONLY_SECTION_START}
+
+## Scope
+
+| Field | Value |
+|-------|-------|
+| **Ref** | {REF} |
+| **Files audited** | {N_FILES} |
+| **Files list** | {FILE_LIST} |
+
+Note: This is a scoped audit. Only changed files were analyzed. Run a full `/codebase-audit` for complete coverage.
+
+{CHANGED_ONLY_SECTION_END}
 
 ## Health Score: {SCORE}/100
 
