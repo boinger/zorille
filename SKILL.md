@@ -413,6 +413,7 @@ After writing the report file, print a summary directly to the conversation. Thi
 6. **Regression delta** (if applicable): Score change, count of fixed/new findings
 7. **Fix Coverage** (if `--suggest-fixes`): "N of M findings have suggested fixes (X%)" — gives instant signal on how actionable the audit is
 8. **Quick Fix Preview** (if `--quick-fix`): "N fixes will be auto-applied in Phase 5 (M skipped: K review-suggested, J multi-file, L too large)" — tells the user what Phase 5 will do before it runs
+9. **Quick Fix Suggestion** (if `--quick-fix` was NOT used and there are `[HIGH CONFIDENCE]` single-file findings): "Tip: N of these findings could be auto-applied with `/codebase-audit --quick-fix`" — surfaces the feature when it would have helped
 
 ### 4.7 Write the Fix Plan
 

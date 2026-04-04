@@ -121,6 +121,12 @@ describe("E2E: Quick-fix documentation completeness", () => {
     );
   });
 
+  test("quick-fix is suggested when not used but applicable", () => {
+    expect(skillMd).toContain(
+      "could be auto-applied with `/codebase-audit --quick-fix`",
+    );
+  });
+
   test("report template supports quick-fix section", () => {
     const template = fs.readFileSync(
       path.join(ROOT, "report-template.md"),
