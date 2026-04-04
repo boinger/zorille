@@ -103,3 +103,29 @@ describe("E2E: SKILL.md references all supporting files", () => {
     expect(skillMd).toContain("baseline.json");
   });
 });
+
+describe("E2E: Quick-fix documentation completeness", () => {
+  const skillMd = fs.readFileSync(path.join(ROOT, "SKILL.md"), "utf-8");
+
+  test("quick-fix has dirty working tree handling", () => {
+    expect(skillMd).toContain("git status --porcelain");
+  });
+
+  test("quick-fix has commit proposal with AskUserQuestion", () => {
+    expect(skillMd).toContain("Commit with this message");
+  });
+
+  test("quick-fix documents same-file re-read requirement", () => {
+    expect(skillMd).toContain(
+      "re-Read the file before attempting the next",
+    );
+  });
+
+  test("report template supports quick-fix section", () => {
+    const template = fs.readFileSync(
+      path.join(ROOT, "report-template.md"),
+      "utf-8",
+    );
+    expect(template).toContain("Quick Fix Results");
+  });
+});

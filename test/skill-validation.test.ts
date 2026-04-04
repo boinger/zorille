@@ -14,7 +14,7 @@ describe("Skill structure validation", () => {
   test("has valid YAML frontmatter", () => {
     expect(skillMd).toMatch(/^---\n/);
     expect(skillMd).toMatch(/\nname: codebase-audit\n/);
-    expect(skillMd).toMatch(/\nversion: 1\.0\.0\n/);
+    expect(skillMd).toMatch(/\nversion: 1\.1\.0\n/);
     expect(skillMd).toMatch(/\ndescription: \|/);
     expect(skillMd).toMatch(/\nallowed-tools:/);
   });
@@ -37,7 +37,28 @@ describe("Skill structure validation", () => {
   test("has mode documentation", () => {
     expect(skillMd).toContain("--quick");
     expect(skillMd).toContain("--suggest-fixes");
+    expect(skillMd).toContain("--quick-fix");
     expect(skillMd).toContain("Regression");
+  });
+
+  test("has Phase 5 for quick-fix", () => {
+    expect(skillMd).toContain("## Phase 5: Quick Fix Application");
+  });
+
+  test("quick-fix implies suggest-fixes", () => {
+    expect(skillMd).toContain(
+      "`--quick-fix` implies `--suggest-fixes`",
+    );
+  });
+
+  test("quick-fix is ignored in quick mode", () => {
+    expect(skillMd).toContain("`--quick-fix` with `--quick`");
+  });
+
+  test("quick-fix eligibility criteria are documented", () => {
+    expect(skillMd).toContain("[HIGH CONFIDENCE]");
+    expect(skillMd).toContain("Less than 10 lines changed");
+    expect(skillMd).toContain("Single file change");
   });
 
   test("has voice directive", () => {

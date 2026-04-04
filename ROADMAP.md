@@ -76,15 +76,8 @@ Three tiers of fix automation, from safest to most autonomous:
 ### `--suggest-fixes` (exists today)
 Generates unified diffs inline with findings. Read-only — user applies manually.
 
-### `--quick-fix` (new)
-Automatically apply mechanical, high-confidence fixes. Scope:
-- One-liner fixes only (single file, <10 lines changed)
-- Must be tagged `[HIGH CONFIDENCE]` by the audit
-- Examples: adding `.gitignore` entries, pinning dependency versions, narrowing catch types, adding missing timeouts with safe defaults
-- Creates a single commit with all applied fixes
-- Prints a summary of what was changed and what was skipped
-
-**Not in scope for `--quick-fix`:** anything tagged `[REVIEW SUGGESTED]`, multi-file changes, architectural fixes, test additions.
+### `--quick-fix` (shipped in v1.1.0)
+Auto-applies mechanical `[HIGH CONFIDENCE]` fixes (single file, <10 lines) in Phase 5 after the audit. Stages changes and proposes a commit message for user approval. Future enhancement: optionally run tests after applying and offer revert on failure.
 
 ### `--plan-fixes` (new)
 Generate a comprehensive fix plan (what `--suggest-fixes` does today for the plan file, but more structured). Outputs an actionable plan covering both mechanical and substantive fixes, with estimated scope per item. Does not apply anything — the user reviews and accepts.
@@ -132,8 +125,8 @@ This enables community-contributed domain-specific checklists without bloating t
 
 Rough implementation priority based on user value and complexity:
 
-1. Focused modes (`--security-only` etc.) — low complexity, high value
-2. `--quick-fix` — natural extension of existing `--suggest-fixes`
+1. ~~`--quick-fix` — natural extension of existing `--suggest-fixes`~~ **SHIPPED v1.1.0**
+2. Focused modes (`--security-only` etc.) — low complexity, high value
 3. `--ci` + `--json` — enables automation, often requested
 4. `--min-severity` — simple filter, useful with `--ci`
 5. `--plus-infra` — new scan surface, medium complexity

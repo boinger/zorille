@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.0] - 2026-04-03
+
+### Features
+
+- **Quick fix mode** (`--quick-fix`): Auto-applies mechanical `[HIGH CONFIDENCE]` fixes after the audit (Phase 5). Eligibility: single file, <10 lines changed, not vendored/generated. Stages changes and proposes commit message for user approval.
+- Implies `--suggest-fixes` automatically
+- Dirty working tree detection with proceed/abort prompt
+- Same-file conflict handling with fresh re-reads between fixes
+
 ## [1.0.0] - 2026-04-03
 
 Initial standalone release. Zero external dependencies.

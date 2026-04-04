@@ -1,10 +1,10 @@
 ---
 name: codebase-audit
-version: 1.0.0
+version: 1.1.0
 description: |
   Full codebase audit. Analyzes an entire project cold, no diff, no branch context,
   producing a structured report covering bugs, security issues, architectural problems,
-  tech debt, test gaps, and improvement opportunities. Read-only, never modifies code.
+  tech debt, test gaps, and improvement opportunities. Read-only by default; --quick-fix auto-applies mechanical fixes.
   Use when asked to "audit this codebase", "codebase health", "tech debt assessment",
   "code quality review", "what's wrong with this code", or "analyze this codebase".
   NOT for reviewing a diff or PR.
@@ -60,12 +60,19 @@ Detect the mode from arguments:
   - Quick: IGNORED (quick mode targets 2 minutes; generating diffs adds latency per finding)
   - Future focused modes (`--security-only` etc.): YES (applies to scanned subset)
   - Future CI mode (`--ci`): IGNORED (CI wants machine-readable PASS/FAIL, not diffs)
+- **Quick Fix** (`--quick-fix`): Implies `--suggest-fixes`. Runs the full audit, then automatically applies all mechanical fixes tagged `[HIGH CONFIDENCE]` that meet quick-fix criteria (single file, <10 lines changed) in Phase 5. Mode compatibility:
+  - Full: YES (default use case)
+  - Regression: YES (runs full audit)
+  - Quick: IGNORED (same rationale as `--suggest-fixes` — quick mode targets 2 minutes)
+  - Future focused modes (`--security-only` etc.): YES (applies to scanned subset)
+  - Future CI mode (`--ci`): IGNORED (CI wants pass/fail, not file modifications)
 
 ## Arguments
 
 - `/codebase-audit` — full audit of the current project
 - `/codebase-audit --quick` — quick smoke audit (2-min health check)
 - `/codebase-audit --suggest-fixes` — full audit with inline fix diffs per finding
+- `/codebase-audit --quick-fix` — full audit, then auto-apply high-confidence mechanical fixes
 
 ---
 
@@ -337,6 +344,7 @@ Schema:
   "mode": "full",
   "slug": "org-project",
   "health_score": 72,
+  "quick_fix_applied": false,
   "codebase": {
     "loc": 24500,
     "languages": ["TypeScript", "Python"],
@@ -352,7 +360,8 @@ Schema:
       "title": "SQL injection in user search",
       "file": "src/api/users.ts",
       "line": 42,
-      "has_suggested_fix": true
+      "has_suggested_fix": true,
+      "quick_fix_status": "applied"
     }
   ],
   "summary": {
@@ -365,7 +374,7 @@ Schema:
 }
 ```
 
-The `has_suggested_fix` field is present when `--suggest-fixes` was used. Omit it otherwise — old baselines won't have it, and consumers should treat a missing field as `false`. The finding ID hash does NOT include this field (it's based on `file:category:title` only), so adding or removing fix suggestions doesn't change finding identity for regression tracking.
+The `has_suggested_fix` field is present when `--suggest-fixes` was used. The `quick_fix_status` field is present when `--quick-fix` was used — values are `"applied"`, `"skipped"`, or omitted. The `quick_fix_applied` top-level field is `true` when `--quick-fix` was active. Omit all these fields when the corresponding flag was not used — old baselines won't have them, and consumers should treat missing fields as `false`/`null`. The finding ID hash does NOT include these fields (it's based on `file:category:title` only), so adding or removing fix suggestions or quick-fix status doesn't change finding identity for regression tracking.
 
 Each finding gets a deterministic content-based ID for stable regression comparison. Compute it as:
 
@@ -403,6 +412,7 @@ After writing the report file, print a summary directly to the conversation. Thi
 5. **Report location**: Full path to the written report
 6. **Regression delta** (if applicable): Score change, count of fixed/new findings
 7. **Fix Coverage** (if `--suggest-fixes`): "N of M findings have suggested fixes (X%)" — gives instant signal on how actionable the audit is
+8. **Quick Fix Preview** (if `--quick-fix`): "N fixes will be auto-applied in Phase 5 (M skipped: K review-suggested, J multi-file, L too large)" — tells the user what Phase 5 will do before it runs
 
 ### 4.7 Write the Fix Plan
 
@@ -455,7 +465,18 @@ Health score: {N}/100. No critical or important findings.
 See full report at $AUDIT_HOME/{slug}/audits/{datetime}-audit.md
 ```
 
-**After writing the plan**, use AskUserQuestion to offer the next step:
+**If `--quick-fix` is active:** Mark Part 1a findings (HIGH CONFIDENCE, single-file, <10 lines) with `[AUTO-APPLYING]` prefix in the plan. These still appear for documentation, but Phase 5 will apply them automatically. The plan's recommended workflow becomes:
+
+> **Recommended workflow:**
+> 1. Phase 5 will auto-apply Part 1a (high-confidence mechanical fixes)
+> 2. Review Part 1b (review-suggested fixes) and apply manually
+> 3. Then review Part 2 (substantive fixes) before implementing
+
+If all findings are auto-applying (no Part 1b or Part 2), the plan says: "All fixes will be applied by --quick-fix. No further manual action needed."
+
+Skip the AskUserQuestion in Phase 4.7 when `--quick-fix` is active — the user already opted into auto-application by passing the flag. Proceed directly to Phase 5.
+
+**If `--quick-fix` is NOT active**, use AskUserQuestion to offer the next step:
 
 If there are substantive findings (Part 2 exists):
 
@@ -475,6 +496,106 @@ Options:
 
 ---
 
+## Phase 5: Quick Fix Application
+
+Skip this phase entirely unless `--quick-fix` is active. This phase modifies source code.
+
+### 5.1 Check preconditions
+
+Before modifying any files, check the working tree:
+
+```bash
+git status --porcelain 2>/dev/null
+```
+
+If the output is non-empty (uncommitted changes exist), use AskUserQuestion:
+
+> "Working tree has uncommitted changes. Quick-fix modifications will be mixed with existing changes."
+
+Options:
+- **A) Proceed anyway** — apply fixes alongside existing changes
+- **B) Abort Phase 5** — skip fix application, keep the report and plan as-is
+
+If this is not a git repo, skip this check and proceed (commit proposal in 5.4 will also be skipped).
+
+### 5.2 Collect eligible fixes
+
+From the findings generated in Phase 3, collect all fixes that meet ALL of these criteria:
+
+1. Tagged `[HIGH CONFIDENCE]`
+2. Single file change (diff touches exactly one file)
+3. Less than 10 lines changed (sum of added + removed lines in the unified diff)
+4. File is not vendored (`node_modules/`, `vendor/`, `.git/`), generated (`dist/`, `build/`), or binary
+5. File still exists at the path referenced in the diff
+
+Fixes that fail any criterion are **skipped**. Track each skipped fix and its skip reason (e.g., "review-suggested", "multi-file", "too large", "file not found").
+
+If zero fixes are eligible, print "No fixes met quick-fix criteria. All findings require manual review — see the fix plan." and skip to Phase 5.5.
+
+### 5.3 Apply fixes
+
+For each eligible fix, in the order they appeared in the findings:
+
+1. **Read the target file fresh.** Do NOT rely on line numbers from Phase 3 — earlier fixes in Phase 5 may have shifted them. Use the Edit tool's `old_string` matching to locate the correct position.
+2. **Verify context.** The diff's context lines (unchanged lines surrounding the change) and `-` lines (lines to be removed/replaced) must match the current file content exactly.
+3. **If context matches:** Apply the fix using the Edit tool. Use the `-` lines as `old_string` and the `+` lines as `new_string`, with enough surrounding context to ensure a unique match.
+4. **If context does NOT match:** Skip the fix and record reason: "file content changed since audit" or "conflict with earlier fix in same file."
+
+**Important:**
+- Apply one fix at a time. If a fix fails to apply, skip it and continue with the remaining fixes. Do not abort Phase 5 because one fix failed.
+- For multiple fixes in the same file: after applying each fix, re-Read the file before attempting the next. Line numbers from Phase 3 are stale after any modification.
+- Never modify anything beyond the exact change described in the diff. No cleanup, no reformatting, no adjacent improvements.
+
+### 5.4 Stage and propose commit
+
+If at least one fix was applied and this is a git repo:
+
+1. Stage only the specific files modified by quick-fix:
+   ```bash
+   git add <file1> <file2> ...
+   ```
+   Do NOT use `git add -A` or `git add .`.
+
+2. Print the quick-fix summary:
+   - **Applied** (N fixes): list each with file path, finding title, and one-line description of the change
+   - **Skipped** (M fixes): list each with file path, finding title, and skip reason
+
+3. Print the proposed commit message:
+   ```
+   fix: apply N mechanical fixes from codebase audit
+
+   - <finding title> (file)
+   - <finding title> (file)
+   ...
+   ```
+
+4. Use AskUserQuestion:
+   > "N mechanical fixes applied and staged."
+
+   Options:
+   - **A) Commit with this message**
+   - **B) Commit with a different message**
+   - **C) Keep staged, don't commit** (user will commit manually)
+   - **D) Unstage everything** (user wants to review further)
+
+5. Execute the user's choice:
+   - A: Create the commit with the proposed message.
+   - B: Ask for the message, then create the commit.
+   - C: Do nothing further.
+   - D: Run `git reset HEAD <files>` to unstage.
+
+If this is not a git repo, skip this step entirely — just print the applied/skipped summary.
+
+### 5.5 Final summary
+
+Print:
+- "Quick-fix complete. N fixes applied, M skipped."
+- "Recommend running your test suite to verify: `{detected test command}`" — detect the test command from `package.json` scripts, `Makefile`, or equivalent.
+- If remaining plan items exist (Part 1b or Part 2): "The fix plan still contains K items requiring manual review."
+- Report location reminder.
+
+---
+
 ## Edge Cases
 
 - **Empty or binary-only project**: If the codebase has fewer than 10 text files or fewer than 100 LOC, write a brief report noting this and exit gracefully. Do not force findings.
@@ -486,23 +607,28 @@ Options:
 - **Network failures**: If dependency audit commands fail due to network issues, skip gracefully and note the skip in the report.
 - **`--suggest-fixes` with `--quick`**: Ignore the `--suggest-fixes` flag and note in the report: "Fix suggestions are not available in quick mode — run a full audit with `--suggest-fixes` for inline diffs." Quick mode targets a 2-minute time budget; diff generation adds latency per finding.
 - **Ambiguous fixes**: When multiple valid fix approaches exist (e.g., "add input validation" could mean regex, schema validation, or type checking), show the simplest approach and note: "Alternative approaches exist — see Recommendation."
+- **`--quick-fix` with `--quick`**: Ignore the `--quick-fix` flag and note in the report: "Quick-fix is not available in quick mode — run a full audit with `--quick-fix` for auto-applied fixes."
+- **`--quick-fix` with zero eligible fixes**: All fixes were skipped (review-suggested, multi-file, too large, or stale). Print summary explaining why each was skipped and direct the user to the fix plan.
+- **`--quick-fix` on a dirty working tree**: Phase 5.1 checks `git status --porcelain`. If uncommitted changes exist, warn the user and ask whether to proceed (fixes will be mixed with existing changes) or abort Phase 5.
+- **`--quick-fix` in a non-git repo**: Skip the commit proposal (Phase 5.4). Apply fixes and print the summary only.
 
 ---
 
 ## Key Rules
 
-1. During audit phases (1-3), you MUST NOT modify any source code. Phase 4 writes the report/baseline to `$AUDIT_HOME` and the fix plan to the plan file. When the plan is executed (after "Ready to code?"), you may edit source code to implement the fixes.
+1. During audit phases (1-3), you MUST NOT modify any source code. Phase 4 writes the report/baseline to `$AUDIT_HOME` and the fix plan to the plan file. Phase 5 (`--quick-fix` only) applies mechanical fixes to source code — this is the only phase that modifies project files. When the plan is executed (after "Ready to code?"), you may edit source code to implement the remaining fixes.
 2. Findings that reference specific code MUST include `file:line`. Findings about missing functionality (missing tests, missing error handling), dependency vulnerabilities, or architectural patterns should reference the most relevant file or component instead. Never report a finding you cannot anchor to something concrete in the codebase.
 3. Reports are saved to your home directory (`$AUDIT_HOME`), not the project directory. They may contain security findings — do not commit them to public repos.
 4. No hallucinating findings. Every finding must reference a specific file and line (or component for non-code findings). If you can't point to it, don't report it.
 5. Use the severity calibration definitions exactly as specified. Do not inflate or deflate severity.
 6. In quick mode, respect the 2-minute target. Do not run Phase 2 or the full Phase 3 checklist.
-7. AskUserQuestion fires in two places: (1) Phase 1 if >50K LOC, to scope the audit; (2) Phase 4.7 after the plan is written, to offer the next step. Do not use AskUserQuestion elsewhere during the audit.
+7. AskUserQuestion fires in three places: (1) Phase 1 if >50K LOC, to scope the audit; (2) Phase 4.7 after the plan is written, to offer the next step; (3) Phase 5 (`--quick-fix` only) for dirty working tree check and commit proposal. Do not use AskUserQuestion elsewhere during the audit.
 8. All bash blocks are self-contained. Do not rely on shell variables persisting between code blocks.
 9. When reading files for context, read enough surrounding lines to understand the code — do not make judgments from a single line in isolation.
 10. Cap detailed findings at 50. Summarize overflow in a table.
 11. Be aware of your knowledge cutoff. Do not flag dependency versions, language versions, or API usage as "deprecated" or "nonexistent" based solely on your training data. If uncertain whether a version exists, state the uncertainty rather than asserting it as a finding.
 12. Always use the Read tool to read files — never use `cat` via Bash. The Read tool provides better context and is the expected convention.
-13. The audit is planning-for-a-plan. Phases 1-3 are read-only research. Phase 4 produces two outputs: the archival report (written to `$AUDIT_HOME` via Bash) and the fix plan (written to the plan file). The plan file is the correct, actionable output — "Ready to code?" means "execute this fix plan." This is fully compatible with plan mode.
+13. The audit is planning-for-a-plan. Phases 1-3 are read-only research. Phase 4 produces two outputs: the archival report (written to `$AUDIT_HOME` via Bash) and the fix plan (written to the plan file). The plan file is the correct, actionable output — "Ready to code?" means "execute this fix plan." When `--quick-fix` is active, findings auto-applied by Phase 5 are marked `[AUTO-APPLYING]` in the plan — only substantive and review-suggested items remain actionable.
 14. **NEVER use Grep in `content` mode during checklist execution.** Always use `files_with_matches` mode. If a regex returns more than ~20 lines, the pattern is too broad — use `files_with_matches` to get filenames, then Read specific line ranges. Multiline regex patterns (e.g., patterns matching across `{` `}` boundaries) are especially dangerous and must NEVER be run in content mode.
-15. When `--suggest-fixes` is active, generate diffs during Phase 3 immediately after confirming each finding — not batched at the end of Phase 3, not retroactively in Phase 4. The code context from the Read that confirmed the finding is essential for accurate diffs. Each diff must be a minimal, conservative change. Never suggest refactoring beyond the specific finding. If a finding cannot be fixed with a short diff, mark it accordingly rather than forcing a bad suggestion. The unified diff format is chosen to enable a future `--fix` flag to parse and apply diffs mechanically.
+15. When `--suggest-fixes` is active, generate diffs during Phase 3 immediately after confirming each finding — not batched at the end of Phase 3, not retroactively in Phase 4. The code context from the Read that confirmed the finding is essential for accurate diffs. Each diff must be a minimal, conservative change. Never suggest refactoring beyond the specific finding. If a finding cannot be fixed with a short diff, mark it accordingly rather than forcing a bad suggestion. The unified diff format enables `--quick-fix` (Phase 5) to parse and apply diffs mechanically.
+16. `--quick-fix` implies `--suggest-fixes`. If the user passes `--quick-fix` without `--suggest-fixes`, activate suggest-fixes behavior automatically. Quick-fix requires diffs to apply.

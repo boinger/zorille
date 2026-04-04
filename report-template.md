@@ -10,7 +10,7 @@
 | **LOC** | {LOC} |
 | **Files** | {FILE_COUNT} |
 | **Test Files** | {TEST_FILE_COUNT} |
-| **Mode** | {MODE} (may include `--suggest-fixes`) |
+| **Mode** | {MODE} (may include `--suggest-fixes`, `--quick-fix`) |
 | **Duration** | {DURATION} |
 
 ## Health Score: {SCORE}/100
@@ -136,6 +136,26 @@
 {NEW_FINDINGS}
 
 {REGRESSION_SECTION_END}
+
+{QUICKFIX_SECTION_START}
+
+## Quick Fix Results
+
+| Metric | Count |
+|--------|-------|
+| Fixes applied | {N_APPLIED} |
+| Fixes skipped | {N_SKIPPED} |
+| Commit | {COMMIT_SHA_OR_NOT_COMMITTED} |
+
+### Applied
+{APPLIED_LIST}
+
+### Skipped
+| Finding | File | Reason |
+|---------|------|--------|
+{SKIPPED_TABLE}
+
+{QUICKFIX_SECTION_END}
 
 ## Audit Metadata
 
