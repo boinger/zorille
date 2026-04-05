@@ -176,3 +176,57 @@ describe("E2E: Changed-only documentation completeness", () => {
     expect(template).toContain("This is a scoped audit");
   });
 });
+
+describe("E2E: CI/JSON mode documentation completeness", () => {
+  const skillMd = fs.readFileSync(path.join(ROOT, "SKILL.md"), "utf-8");
+
+  test("JSON schema fields are documented", () => {
+    expect(skillMd).toContain("schema_version");
+    expect(skillMd).toContain("tool_version");
+    expect(skillMd).toContain("duration_seconds");
+    expect(skillMd).toContain("findings_count");
+    expect(skillMd).toContain("ignored_flags");
+  });
+
+  test("exit codes are documented", () => {
+    expect(skillMd).toContain("exit 0");
+    expect(skillMd).toContain("exit 1");
+  });
+
+  test("fail-on-regression is documented", () => {
+    expect(skillMd).toContain("--fail-on-regression");
+  });
+
+  test("fail-on-new is documented", () => {
+    expect(skillMd).toContain("--fail-on-new");
+  });
+
+  test("CI JSON is built from baseline.json", () => {
+    expect(skillMd).toContain(
+      "Read the baseline written in Phase 4.4",
+    );
+  });
+
+  test("min-severity filter is documented", () => {
+    expect(skillMd).toContain("--min-severity");
+    expect(skillMd).toContain(
+      "Does NOT affect health score calculation",
+    );
+  });
+
+  test("exit code limitation is documented", () => {
+    expect(skillMd).toContain(
+      "exits the Bash subprocess, not the Claude Code session",
+    );
+  });
+});
+
+describe("E2E: report template supports CI mode", () => {
+  test("report template mode field mentions --ci", () => {
+    const template = fs.readFileSync(
+      path.join(ROOT, "report-template.md"),
+      "utf-8",
+    );
+    expect(template).toContain("--ci");
+  });
+});

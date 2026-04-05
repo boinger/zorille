@@ -1,6 +1,6 @@
 ---
 name: codebase-audit
-version: 1.2.0
+version: 1.3.0
 description: |
   Full codebase audit. Analyzes an entire project cold, no diff, no branch context,
   producing a structured report covering bugs, security issues, architectural problems,
@@ -59,18 +59,28 @@ Detect the mode from arguments:
   - Regression: YES (runs full audit)
   - Quick: IGNORED (quick mode targets 2 minutes; generating diffs adds latency per finding)
   - Future focused modes (`--security-only` etc.): YES (applies to scanned subset)
-  - Future CI mode (`--ci`): IGNORED (CI wants machine-readable PASS/FAIL, not diffs)
+  - CI mode (`--ci`): IGNORED (CI wants machine-readable PASS/FAIL, not diffs)
 - **Quick Fix** (`--quick-fix`): Implies `--suggest-fixes`. Runs the full audit, then automatically applies all mechanical fixes tagged `[HIGH CONFIDENCE]` that meet quick-fix criteria (single file, <10 lines changed) in Phase 5. Mode compatibility:
   - Full: YES (default use case)
   - Regression: YES (runs full audit)
   - Quick: IGNORED (same rationale as `--suggest-fixes` — quick mode targets 2 minutes)
   - Future focused modes (`--security-only` etc.): YES (applies to scanned subset)
-  - Future CI mode (`--ci`): IGNORED (CI wants pass/fail, not file modifications)
+  - CI mode (`--ci`): IGNORED (CI wants pass/fail, not file modifications)
 - **Changed Only** (`--changed-only [ref]`): Scopes the audit to files changed since a git ref. Default ref: merge base of current branch against the default branch. Skips Phase 2 (architecture scan) and does not write a baseline (partial audits would corrupt regression tracking). Mode compatibility:
   - Full flags (`--suggest-fixes`, `--quick-fix`): YES — applies to changed files
   - Quick: IGNORED (changed-only is already fast)
   - Regression: SKIP (no baseline to compare)
   - Non-git repo: ERROR (requires git)
+- **CI** (`--ci`): Machine-readable output for CI/CD pipelines. Implies `--json`. Outputs JSON to stdout via single-quoted heredoc and progress to stderr. Exits with code 0 (pass) or 1 (fail) based on finding threshold. All interactive prompts are suppressed — AskUserQuestion is never called. Mode compatibility:
+  - `--fail-on <level>`: Set fail threshold — `critical` (default) or `important`. Default: `critical`
+  - `--fail-on-regression`: Also fail if health score decreased since last baseline
+  - `--fail-on-new`: Fail only on NEW findings (not in previous baseline) at or above `--fail-on` threshold. No baseline → falls back to normal threshold. For legacy codebase onboarding
+  - `--changed-only`: YES — scoped CI check
+  - `--quick`: YES — fast CI gate
+  - `--suggest-fixes`: IGNORED, noted in `metadata.ignored_flags`
+  - `--quick-fix`: IGNORED, noted in `metadata.ignored_flags`
+- **JSON** (`--json`): Structured JSON output to stdout. Same format as `--ci` but without exit codes or fail thresholds. Status is always "pass". No plan file written. AskUserQuestion suppressed. Can be used standalone for dashboards, scripts, or tooling integration.
+- **Severity Filter** (`--min-severity <level>`): Filters findings in output to only those at or above the specified severity: `critical`, `important`, or `notable`. Does NOT affect health score calculation (score always counts all findings). Applies to report, conversation summary, and CI JSON `findings` array.
 
 ## Arguments
 
@@ -81,6 +91,13 @@ Detect the mode from arguments:
 - `/codebase-audit --changed-only` — audit files changed since branch diverged from default branch
 - `/codebase-audit --changed-only HEAD~5` — audit files changed in last 5 commits
 - `/codebase-audit --changed-only main` — audit files changed vs main
+- `/codebase-audit --ci` — CI mode: JSON output, exit code 0/1, no prompts
+- `/codebase-audit --ci --fail-on critical` — CI mode, fail only on critical findings (default)
+- `/codebase-audit --ci --fail-on important` — CI mode, fail on critical or important
+- `/codebase-audit --ci --fail-on-regression` — also fail if score regressed
+- `/codebase-audit --ci --fail-on-new` — fail only on new findings vs baseline
+- `/codebase-audit --json` — JSON output without CI exit-code behavior
+- `/codebase-audit --min-severity important` — show only important+ findings
 
 ---
 
@@ -171,7 +188,7 @@ If the audit tool is not installed or the command fails, skip gracefully and not
 Based on codebase size from step 1.3:
 - **Small** (<10K LOC): Read everything. Full coverage is feasible.
 - **Medium** (10K–50K LOC): Read high-risk files fully (entry points, auth, payment, data access, configs). Sample the rest using Grep pattern matches.
-- **Large** (>50K LOC): Use AskUserQuestion to ask the user which areas to focus on. Suggest the top 3 areas based on churn hotspots and framework-specific risk areas. Do not proceed until the user responds.
+- **Large** (>50K LOC): Use AskUserQuestion to ask the user which areas to focus on. Suggest the top 3 areas based on churn hotspots and framework-specific risk areas. Do not proceed until the user responds. If `--ci` or `--json` is active, use the Medium strategy automatically instead — do not use AskUserQuestion. CI/JSON mode must be non-interactive.
 
 If in quick mode, stop after this phase. Jump to the Phase 3 quick-mode subset (top 10 `[QUICK]` patterns only), then skip to Phase 4 for the slim report.
 
@@ -462,7 +479,9 @@ If no previous baseline exists, skip regression comparison.
 
 ### 4.6 Conversation summary
 
-After writing the report file, print a summary directly to the conversation. This is what the user sees immediately:
+If `--ci` or `--json` is active, replace the human-readable conversation summary with JSON construction. Progress messages during Phases 1-3 go to stderr (`echo '...' >&2`). The JSON is NOT emitted here — data is assembled for Phase 4.8. If `--min-severity` is active, filter the findings array and conversation summary to only include findings at or above the specified severity level.
+
+Otherwise, print a summary directly to the conversation. This is what the user sees immediately:
 
 1. **Health Score**: The number and a one-line interpretation (e.g., "72/100 — solid foundation with some important gaps")
 2. **Executive Summary**: 3-5 sentences
@@ -480,6 +499,8 @@ After writing the report file, print a summary directly to the conversation. Thi
     - If no tips are applicable, omit the Tips block entirely.
 
 ### 4.7 Write the Fix Plan
+
+Skip this phase if `--ci` is active (no plan file). In `--json` mode without `--ci`, also skip the plan file. AskUserQuestion is never called in `--ci` or `--json` mode.
 
 After printing the conversation summary, write the fix plan to the plan file. The audit is planning-for-a-plan — the plan file is the natural, actionable output.
 
@@ -559,11 +580,64 @@ Options:
 - **A) Apply fixes now** (recommended)
 - **B) I want to review the plan first**
 
+### 4.8 CI exit
+
+Skip unless `--ci` or `--json` is active.
+
+**Build the CI JSON from baseline.json:** Read the baseline written in Phase 4.4 and augment with CI-specific fields:
+- `status`: "pass" or "fail" (always "pass" for `--json` without `--ci`)
+- `threshold`: the `--fail-on` level (default: "critical")
+- `findings_above_threshold`: count of findings at or above threshold
+- `findings_count`: total findings count (for truncation detection)
+- `metadata.schema_version`: "1.0"
+- `metadata.tool_version`: read from VERSION file
+- `metadata.duration_seconds`: elapsed time since audit start
+- `metadata.mode`: "ci" or "json"
+- `metadata.flags`: array of invocation flags used
+- `metadata.ignored_flags`: array of suppressed flags (e.g., `--suggest-fixes` in CI mode)
+
+If `--min-severity` is active, filter the `findings` array to only include findings at or above the specified severity. `findings_count` reflects the filtered count. Health score and `summary` are NOT filtered (they reflect full audit). Note: this means `summary.total` and `findings_count` may differ when `--min-severity` is used — this is intentional (`summary` = full audit picture, `findings` array = filtered view).
+
+**Determine pass/fail** (skip for `--json` without `--ci`):
+
+1. Count findings at or above the `--fail-on` threshold (default: `critical`)
+   - `--fail-on critical`: fail if any critical findings
+   - `--fail-on important`: fail if any critical or important findings
+2. If `--fail-on-regression` and a previous baseline exists: also fail if `health_score` decreased
+3. If `--fail-on-new` and a previous baseline exists: count only findings whose IDs are NOT in the previous baseline. Fail if any new findings at or above `--fail-on` threshold. No baseline → fall back to normal threshold.
+4. Set `status` to `"pass"` or `"fail"`
+
+**Emit JSON** via single-quoted heredoc to prevent shell expansion:
+
+```bash
+cat <<'EOF'
+{ ... the JSON ... }
+EOF
+```
+
+**Write JSON to file:** Also write the JSON to `$AUDIT_HOME/$SLUG/audits/{dt}-ci-output.json` as a file-based fallback for CI systems that have trouble capturing stdout.
+
+**Exit** (`--ci` only):
+
+```bash
+exit 0  # pass
+```
+
+or:
+
+```bash
+exit 1  # fail
+```
+
+CI consumers SHOULD parse the JSON `status` field as the primary signal. The `exit 0`/`exit 1` from the Bash block is a convenience — it exits the Bash subprocess, not the Claude Code session, and may not propagate to the CI runner's exit code depending on how Claude Code is invoked.
+
+Do not proceed to Phase 5 in `--ci` mode.
+
 ---
 
 ## Phase 5: Quick Fix Application
 
-Skip this phase entirely unless `--quick-fix` is active. This phase modifies source code.
+Skip this phase entirely unless `--quick-fix` is active. Also skip if `--ci` is active (CI mode should not modify source code). This phase modifies source code.
 
 ### 5.1 Check preconditions
 
@@ -682,6 +756,13 @@ Print:
 - **`--changed-only` with `--quick`**: IGNORED. Note in report: "Changed-only mode is already fast — `--quick` flag was ignored."
 - **`--changed-only` with binary files in diff**: Grep silently skips binary files. This is expected — document in Phase 1.9 but do not treat as an error.
 - **`--changed-only` with renamed files**: `git diff --name-only` shows the new filename only, which is correct for auditing current state.
+- **`--ci` with `--suggest-fixes`**: IGNORED. Noted in `metadata.ignored_flags` in the JSON output.
+- **`--ci` with `--quick-fix`**: IGNORED. Noted in `metadata.ignored_flags` in the JSON output.
+- **`--ci` with no findings**: Status "pass", empty findings array, `findings_count: 0`.
+- **`--ci` on first run (no baseline)**: Apply threshold normally, write baseline for future runs, `regression` field is null in JSON.
+- **`--json` without `--ci`**: JSON output, no exit codes, no plan file written, AskUserQuestion suppressed. Status is always "pass".
+- **`--min-severity` does not affect health score**: Score always counts all findings. `summary` reflects full audit. `findings` array and `findings_count` are filtered. `summary.total` and `findings_count` may differ — this is intentional.
+- **`--fail-on-new` without baseline**: Falls back to normal threshold behavior (compares against all findings, not just new ones).
 
 ---
 
@@ -693,7 +774,7 @@ Print:
 4. No hallucinating findings. Every finding must reference a specific file and line (or component for non-code findings). If you can't point to it, don't report it.
 5. Use the severity calibration definitions exactly as specified. Do not inflate or deflate severity.
 6. In quick mode, respect the 2-minute target. Do not run Phase 2 or the full Phase 3 checklist. `--changed-only` also skips Phase 2 and does not write a baseline.
-7. AskUserQuestion fires in three places: (1) Phase 1 if >50K LOC, to scope the audit; (2) Phase 4.7 after the plan is written, to offer the next step; (3) Phase 5 (`--quick-fix` only) for dirty working tree check and commit proposal. Do not use AskUserQuestion elsewhere during the audit.
+7. AskUserQuestion fires in three places: (1) Phase 1 if >50K LOC, to scope the audit; (2) Phase 4.7 after the plan is written, to offer the next step; (3) Phase 5 (`--quick-fix` only) for dirty working tree check and commit proposal. In `--ci` or `--json` mode, AskUserQuestion is NEVER called — all decisions are made automatically. Do not use AskUserQuestion elsewhere during the audit.
 8. All bash blocks are self-contained. Do not rely on shell variables persisting between code blocks.
 9. When reading files for context, read enough surrounding lines to understand the code — do not make judgments from a single line in isolation.
 10. Cap detailed findings at 50. Summarize overflow in a table.

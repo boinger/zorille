@@ -19,17 +19,9 @@ These should compose with other flags (e.g., `--security-only --suggest-fixes`).
 
 ---
 
-## CI Mode (`--ci`)
+## CI Mode (`--ci`) (shipped in v1.3.0)
 
-Machine-readable output for CI pipelines.
-
-- Exit code 0 = no critical/important findings, exit code 1 = findings above threshold
-- JSON output to stdout (findings array, health score, summary counts)
-- Configurable fail threshold: `--ci --fail-on important` vs `--ci --fail-on critical`
-- No interactive prompts (AskUserQuestion disabled)
-- Baseline comparison built in: fail if score regressed or new critical findings appeared
-
-`--suggest-fixes` is ignored in CI mode (diffs add latency and CI wants pass/fail, not fix suggestions).
+JSON output to stdout, exit code 0/1, configurable `--fail-on` threshold (default: critical), `--fail-on-regression`, `--fail-on-new`. JSON built from baseline.json for consistency. Includes `schema_version`, `tool_version`, `findings_count`, invocation `flags` and `ignored_flags`. Also bundled: `--json` (standalone) and `--min-severity`.
 
 ---
 
@@ -88,16 +80,11 @@ Naming rationale: `--fix` is too ambiguous and implies "go wild." `--quick-fix` 
 
 ## Output and Filtering
 
-### `--json`
-Structured JSON output for tooling and dashboards. Distinct from `--ci` (which is about exit codes and pipeline integration). `--json` outputs the full findings array, health score, baseline comparison, and metadata.
+### `--json` (shipped in v1.3.0)
+Structured JSON output. Bundled with `--ci` in v1.3.0.
 
-### `--min-severity <level>`
-Filter output to only show findings at or above a severity threshold.
-- `--min-severity critical` — only critical findings
-- `--min-severity important` — critical + important
-- `--min-severity notable` — everything except opportunities
-
-Applies to both report output and exit codes (in `--ci` mode).
+### `--min-severity <level>` (shipped in v1.3.0)
+Filter output to findings at or above a severity threshold. Does not affect health score. Bundled with `--ci`/`--json` in v1.3.0.
 
 ### `--changed-only [ref]` (shipped in v1.2.0)
 Scopes audit to files changed since a git ref (default: merge base). Skips Phase 2, no baseline. Pragmatic Grep threshold: ≤20 files individually, >20 files via full scan + filter.
@@ -126,10 +113,13 @@ Rough implementation priority based on user value and complexity:
 
 1. ~~`--quick-fix` — natural extension of existing `--suggest-fixes`~~ **SHIPPED v1.1.0**
 2. ~~`--changed-only` — scoped audit of changed files~~ **SHIPPED v1.2.0**
-3. Focused modes (`--security-only` etc.) — low complexity, high value
-4. `--ci` + `--json` — enables automation, often requested
-5. `--min-severity` — simple filter, useful with `--ci`
+3. ~~`--ci` + `--json` + `--min-severity` — CI/automation pipeline~~ **SHIPPED v1.3.0**
+4. Focused modes (`--security-only` etc.) — low complexity, high value
+5. SARIF output format (`--format sarif`) — industry standard for static analysis, integrates with GitHub Code Scanning
 6. `--plus-infra` — new scan surface, medium complexity
 7. `--plan-fixes` — refinement of existing plan output
-8. Expanded language patterns — ongoing, incremental
-9. Checklist plugins — nice-to-have, needs plugin discovery design
+8. GitHub Action wrapper — turnkey CI integration
+9. Schema backward compatibility policy documentation
+10. `--baseline-only` / `--no-fail-first-run` — gentler CI onboarding for legacy codebases
+11. Expanded language patterns — ongoing, incremental
+12. Checklist plugins — nice-to-have, needs plugin discovery design

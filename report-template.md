@@ -10,7 +10,7 @@
 | **LOC** | {LOC} |
 | **Files** | {FILE_COUNT} |
 | **Test Files** | {TEST_FILE_COUNT} |
-| **Mode** | {MODE} (may include `--suggest-fixes`, `--quick-fix`, `--changed-only`) |
+| **Mode** | {MODE} (may include `--suggest-fixes`, `--quick-fix`, `--changed-only`, `--ci`, `--json`, `--min-severity`) |
 | **Duration** | {DURATION} |
 
 {CHANGED_ONLY_SECTION_START}

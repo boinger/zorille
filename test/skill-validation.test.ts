@@ -14,7 +14,8 @@ describe("Skill structure validation", () => {
   test("has valid YAML frontmatter", () => {
     expect(skillMd).toMatch(/^---\n/);
     expect(skillMd).toMatch(/\nname: codebase-audit\n/);
-    expect(skillMd).toMatch(/\nversion: 1\.2\.0\n/);
+    const version = fs.readFileSync(path.join(ROOT, "VERSION"), "utf-8").trim();
+    expect(skillMd).toContain(`version: ${version}`);
     expect(skillMd).toMatch(/\ndescription: \|/);
     expect(skillMd).toMatch(/\nallowed-tools:/);
   });
@@ -74,6 +75,19 @@ describe("Skill structure validation", () => {
     expect(skillMd).toContain("[HIGH CONFIDENCE]");
     expect(skillMd).toContain("Less than 10 lines changed");
     expect(skillMd).toContain("Single file change");
+  });
+
+  test("has CI/JSON mode documentation", () => {
+    expect(skillMd).toContain("--ci");
+    expect(skillMd).toContain("--json");
+    expect(skillMd).toContain("--fail-on");
+    expect(skillMd).toContain("--fail-on-regression");
+    expect(skillMd).toContain("--fail-on-new");
+    expect(skillMd).toContain("--min-severity");
+    expect(skillMd).toContain("### 4.8 CI exit");
+    expect(skillMd).toContain("AskUserQuestion is NEVER called");
+    expect(skillMd).toContain("cat <<'EOF'");
+    expect(skillMd).toContain("ci-output.json");
   });
 
   test("has voice directive", () => {
