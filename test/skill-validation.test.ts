@@ -88,6 +88,16 @@ describe("Skill structure validation", () => {
     expect(skillMd).toContain("AskUserQuestion is NEVER called");
     expect(skillMd).toContain("cat <<'EOF'");
     expect(skillMd).toContain("ci-output.json");
+    expect(skillMd).toContain("--baseline-only");
+  });
+
+  test("baseline-only mutual exclusions are documented", () => {
+    expect(skillMd).toContain(
+      "Cannot use `--baseline-only` with `--fail-on-new`",
+    );
+    expect(skillMd).toContain(
+      "Cannot use `--baseline-only` with `--fail-on-regression`",
+    );
   });
 
   test("has SARIF format documentation", () => {

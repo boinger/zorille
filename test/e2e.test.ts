@@ -219,6 +219,18 @@ describe("E2E: CI/JSON mode documentation completeness", () => {
       "exits the Bash subprocess, not the Claude Code session",
     );
   });
+
+  test("baseline-only mode is documented", () => {
+    expect(skillMd).toContain("--baseline-only");
+    expect(skillMd).toContain("unconditionally");
+    expect(skillMd).toContain("baseline_only");
+  });
+
+  test("first-run CI tip is documented", () => {
+    expect(skillMd).toContain(
+      "First CI run on this codebase",
+    );
+  });
 });
 
 describe("E2E: report template supports CI mode", () => {

@@ -1,6 +1,6 @@
 ---
 name: codebase-audit
-version: 1.5.0
+version: 1.6.0
 description: |
   Full codebase audit. Analyzes an entire project cold, no diff, no branch context,
   producing a structured report covering bugs, security issues, architectural problems,
@@ -75,6 +75,7 @@ Detect the mode from arguments:
   - `--fail-on <level>`: Set fail threshold — `critical` (default) or `important`. Default: `critical`
   - `--fail-on-regression`: Also fail if health score decreased since last baseline
   - `--fail-on-new`: Fail only on NEW findings (not in previous baseline) at or above `--fail-on` threshold. No baseline → falls back to normal threshold. For legacy codebase onboarding
+  - `--baseline-only`: Establish baseline for future regression tracking. Runs the full audit, writes baseline, always passes (exit 0). Use for CI onboarding on legacy codebases. Requires `--ci` or `--json`. Mutually exclusive with `--fail-on-new` and `--fail-on-regression`
   - `--changed-only`: YES — scoped CI check
   - `--quick`: YES — fast CI gate
   - `--suggest-fixes`: IGNORED, noted in `metadata.ignored_flags`
@@ -109,6 +110,7 @@ Detect the mode from arguments:
 - `/codebase-audit --format sarif` — SARIF 2.1.0 output for GitHub Code Scanning
 - `/codebase-audit --ci --format sarif` — CI mode with SARIF output
 - `/codebase-audit --ci --format sarif --changed-only` — scoped CI check with SARIF
+- `/codebase-audit --ci --baseline-only` — establish baseline, always passes (for CI onboarding)
 - `/codebase-audit --no-infra` — skip infrastructure scanning even if infra files are present
 
 ---
@@ -528,6 +530,7 @@ Otherwise, print a summary directly to the conversation. This is what the user s
     - If `--suggest-fixes` was used but `--quick-fix` was NOT, and there are `[HIGH CONFIDENCE]` single-file findings: "N of these findings could be auto-applied with `/codebase-audit --quick-fix`"
     - If this is a full audit (not `--changed-only`), on a non-default branch, with >20 findings: "Use `--changed-only` to audit only files changed on this branch."
     - If `--no-infra` was used but infrastructure files were detected: "Infrastructure files detected but scanning was disabled via `--no-infra`."
+    - If `--ci` is active and no previous baseline exists and `--baseline-only` is NOT active: "First CI run on this codebase. Use `--baseline-only` to establish a baseline without failing, then `--fail-on-new` for ongoing runs."
     - If no tips are applicable, omit the Tips block entirely.
 
 ### 4.7 Write the Fix Plan
@@ -618,10 +621,16 @@ Skip unless `--ci`, `--json`, or `--format sarif` is active.
 
 If `--format` is specified with an unsupported value (anything other than `json` or `sarif`), error: "Unsupported format: `{value}`. Supported formats: `json`, `sarif`." and stop.
 
+If `--baseline-only` is used without `--ci` or `--json`, error: "`--baseline-only` requires `--ci` or `--json` mode." and stop.
+
+If `--baseline-only` is used with `--fail-on-new`, error: "Cannot use `--baseline-only` with `--fail-on-new`. Use `--baseline-only` for the first run, then `--fail-on-new` for subsequent runs." and stop.
+
+If `--baseline-only` is used with `--fail-on-regression`, error: "Cannot use `--baseline-only` with `--fail-on-regression`. `--baseline-only` always passes." and stop.
+
 #### 4.8.1 Build output data from baseline
 
 Read the baseline written in Phase 4.4 and augment with output-specific fields:
-- `status`: "pass" or "fail" (always "pass" for `--json` or `--format sarif` without `--ci`)
+- `status`: "pass" or "fail" (always "pass" for `--json` or `--format sarif` without `--ci`, always "pass" for `--baseline-only`)
 - `threshold`: the `--fail-on` level (default: "critical")
 - `findings_above_threshold`: count of findings at or above threshold
 - `findings_count`: total findings count (for truncation detection)
@@ -629,12 +638,15 @@ Read the baseline written in Phase 4.4 and augment with output-specific fields:
 - `metadata.tool_version`: read from VERSION file
 - `metadata.duration_seconds`: elapsed time since audit start
 - `metadata.mode`: "ci", "json", or "sarif"
+- `metadata.baseline_only`: `true` if `--baseline-only` is active (omit otherwise). Lets consumers distinguish "passed because clean" from "passed because baseline mode."
 - `metadata.flags`: array of invocation flags used
 - `metadata.ignored_flags`: array of suppressed flags (e.g., `--suggest-fixes` in CI mode)
 
 If `--min-severity` is active, filter the `findings` array to only include findings at or above the specified severity. `findings_count` reflects the filtered count. Health score and `summary` are NOT filtered (they reflect full audit). Note: this means `summary.total` and `findings_count` may differ when `--min-severity` is used — this is intentional (`summary` = full audit picture, `findings` array = filtered view).
 
 #### 4.8.2 Determine pass/fail
+
+If `--baseline-only` is active, skip pass/fail determination. Set `status` to `"pass"` unconditionally.
 
 Skip for `--json` or `--format sarif` without `--ci`.
 
@@ -752,6 +764,8 @@ EOF
 Write JSON to file: `$AUDIT_HOME/$SLUG/audits/{dt}-ci-output.json`
 
 #### 4.8.4 Exit
+
+If `--baseline-only` is active, always `exit 0` regardless of findings.
 
 `--ci` only — skip for `--json` or `--format sarif` without `--ci`:
 
@@ -899,6 +913,10 @@ Print:
 - **`--json` without `--ci`**: JSON output, no exit codes, no plan file written, AskUserQuestion suppressed. Status is always "pass".
 - **`--min-severity` does not affect health score**: Score always counts all findings. `summary` reflects full audit. `findings` array and `findings_count` are filtered. `summary.total` and `findings_count` may differ — this is intentional.
 - **`--fail-on-new` without baseline**: Falls back to normal threshold behavior (compares against all findings, not just new ones).
+- **`--baseline-only` without `--ci` or `--json`**: ERROR — requires structured output mode.
+- **`--baseline-only` with `--fail-on-new`**: ERROR — mutually exclusive. Use `--baseline-only` for the first run, then `--fail-on-new` for subsequent runs.
+- **`--baseline-only` with `--fail-on-regression`**: ERROR — mutually exclusive. `--baseline-only` always passes, so regression gating contradicts its purpose.
+- **`--baseline-only` re-run**: Overwrites the previous baseline. Idempotent and safe to re-run.
 - **`--format sarif` with `--suggest-fixes`/`--quick-fix`**: IGNORED. SARIF does not carry inline diffs.
 - **`--format sarif` standalone (no `--ci`)**: SARIF to stdout, no exit codes. Equivalent to `--json` but in SARIF format.
 - **`--format sarif` with `--min-severity`**: Filters both `results` and `rules` arrays. Only rules referenced by included results are declared.

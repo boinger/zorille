@@ -120,6 +120,6 @@ Rough implementation priority based on user value and complexity:
 7. `--plan-fixes` — refinement of existing plan output
 8. GitHub Action wrapper — turnkey CI integration
 9. Schema backward compatibility policy documentation
-10. `--baseline-only` / `--no-fail-first-run` — gentler CI onboarding for legacy codebases
+10. ~~`--baseline-only` / `--no-fail-first-run` — gentler CI onboarding~~ **SHIPPED v1.6.0**
 11. Expanded language patterns — ongoing, incremental
 12. Checklist plugins — nice-to-have, needs plugin discovery design

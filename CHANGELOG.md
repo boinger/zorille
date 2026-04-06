@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.6.0] - 2026-04-06
+
+### Features
+
+- **Baseline-only mode** (`--ci --baseline-only`): Establish a baseline for future regression tracking without failing CI. Runs the full audit, writes baseline, always passes (exit 0). For CI onboarding on legacy codebases.
+  - Mutually exclusive with `--fail-on-new` and `--fail-on-regression`
+  - Adds `metadata.baseline_only: true` to JSON output so consumers can distinguish baseline-mode passes
+  - First-run tip suggests `--baseline-only` when no previous baseline exists
+
 ## [1.5.0] - 2026-04-06
 
 ### Features
