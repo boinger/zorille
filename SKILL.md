@@ -1,6 +1,6 @@
 ---
 name: codebase-audit
-version: 1.4.0
+version: 1.5.0
 description: |
   Full codebase audit. Analyzes an entire project cold, no diff, no branch context,
   producing a structured report covering bugs, security issues, architectural problems,
@@ -88,6 +88,7 @@ Detect the mode from arguments:
   - `--quick`: YES
   - `--suggest-fixes` / `--quick-fix`: IGNORED
   - `--format json`: Default (implicit). Explicit `--format json` is accepted but no-op.
+- **Infrastructure Scanning** (automatic): When infrastructure files are detected in Phase 1.2 (Dockerfiles, K8s manifests, Terraform, GitHub Actions, docker-compose, nginx configs), infrastructure patterns are loaded and scanned automatically as an 8th category. Use `--no-infra` to opt out. Infrastructure findings compete on severity with application findings for the 50-finding cap.
 
 ## Arguments
 
@@ -108,6 +109,7 @@ Detect the mode from arguments:
 - `/codebase-audit --format sarif` — SARIF 2.1.0 output for GitHub Code Scanning
 - `/codebase-audit --ci --format sarif` — CI mode with SARIF output
 - `/codebase-audit --ci --format sarif --changed-only` — scoped CI check with SARIF
+- `/codebase-audit --no-infra` — skip infrastructure scanning even if infra files are present
 
 ---
 
@@ -132,6 +134,18 @@ Scan for build files, configs, and entry points to detect the tech stack:
 setopt +o nomatch 2>/dev/null || true
 ls -la package.json Cargo.toml go.mod pyproject.toml Gemfile build.gradle pom.xml Makefile CMakeLists.txt *.csproj *.sln composer.json mix.exs 2>/dev/null || true
 ```
+
+Also scan for infrastructure config files:
+
+```bash
+setopt +o nomatch 2>/dev/null || true
+ls -la Dockerfile docker-compose.yml docker-compose.yaml nginx.conf 2>/dev/null || true
+ls -la .github/workflows/*.yml .github/workflows/*.yaml 2>/dev/null || true
+find . -maxdepth 3 \( -name '*.tf' -o -name '*.tfvars' \) -not -path '*/node_modules/*' -not -path '*/vendor/*' -not -path '*/.git/*' 2>/dev/null | head -5 || true
+find . -maxdepth 3 \( -path '*/k8s/*.yaml' -o -path '*/k8s/*.yml' -o -path '*/deploy/*.yaml' -o -path '*/deploy/*.yml' -o -name 'Chart.yaml' \) -not -path '*/node_modules/*' -not -path '*/vendor/*' -not -path '*/.git/*' 2>/dev/null | head -5 || true
+```
+
+If any infrastructure files are found, note "Infrastructure files detected" for use in Phase 3.1 (auto-loading the infra checklist). This detection is informational — the `--no-infra` flag controls whether infra patterns actually run.
 
 Read whichever build/config files exist to determine: primary language, framework, build tool, test runner, package manager.
 
@@ -290,6 +304,12 @@ Then use the **Read tool** to load the supplemental patterns reference:
 
 `~/.claude/skills/codebase-audit/references/patterns.md`
 
+If infrastructure files were detected in Phase 1.2 and `--no-infra` is NOT active, also load the infrastructure checklist:
+
+`~/.claude/skills/codebase-audit/references/infra-checklist.md`
+
+If the infra checklist file is unreadable or missing, WARN: "Infrastructure checklist not found — skipping infra patterns. Run setup to install." Continue the audit without infra patterns (do not stop). If no infra files were detected in Phase 1.2, skip loading the infra checklist entirely.
+
 ### 3.2 Load custom checklist
 
 If the target project contains `.codebase-audit/checklist.md`, read it and append its items to the built-in checklist. Built-in patterns run first, custom additions run second. This allows projects to define custom audit rules.
@@ -305,6 +325,7 @@ Work through the checklist in priority order:
 5. **Architecture** — coupling, abstraction leaks, circular dependencies, god classes
 6. **Tech Debt** — dead code, TODO/FIXME/HACK comments, deprecated APIs, copy-paste
 7. **Performance** — N+1 queries, unbounded collections, missing indexes, large payloads
+8. **Infrastructure** (if infra files detected and `--no-infra` not active) — Docker, Kubernetes, Terraform, CI/CD, nginx misconfigurations
 
 For each checklist item: use Grep in `files_with_matches` mode (not `content` mode) to find which files match, then use Read to examine the specific lines for confirmation. Do not dump entire file contents into the conversation — use targeted reads of specific line ranges. Do not report a pattern match as a finding without reading the context — many patterns have legitimate uses.
 
@@ -336,7 +357,7 @@ Cap detailed findings at 50. If more than 50 findings are identified, keep the t
 
 Every finding MUST include:
 - **Severity**: Critical, Important, Worth noting, or Opportunity
-- **Category**: Security, Correctness, Reliability, Tests, Architecture, Tech Debt, or Performance
+- **Category**: Security, Correctness, Reliability, Tests, Architecture, Tech Debt, Performance, or Infrastructure
 - **Title**: One-line description
 - **Location**: `file:line` for code findings. For non-code findings (missing tests, dependency vulnerabilities, architectural patterns), reference the most relevant file or component.
 - **Evidence**: The specific code or pattern found
@@ -506,6 +527,7 @@ Otherwise, print a summary directly to the conversation. This is what the user s
     - If neither `--suggest-fixes` nor `--quick-fix` was used and there are findings: "Run with `--suggest-fixes` for inline fix diffs, or `--quick-fix` to auto-apply the safe ones."
     - If `--suggest-fixes` was used but `--quick-fix` was NOT, and there are `[HIGH CONFIDENCE]` single-file findings: "N of these findings could be auto-applied with `/codebase-audit --quick-fix`"
     - If this is a full audit (not `--changed-only`), on a non-default branch, with >20 findings: "Use `--changed-only` to audit only files changed on this branch."
+    - If `--no-infra` was used but infrastructure files were detected: "Infrastructure files detected but scanning was disabled via `--no-infra`."
     - If no tips are applicable, omit the Tips block entirely.
 
 ### 4.7 Write the Fix Plan
@@ -675,7 +697,7 @@ Construct a SARIF 2.1.0 document. Follow this structure exactly:
 ```
 
 **Rule ID construction:** For each finding, construct the rule ID as `{category}/{kebab-title}`:
-- `category`: lowercase finding category (`security`, `correctness`, `reliability`, `architecture`, `tests`, `tech-debt`, `performance`)
+- `category`: lowercase finding category (`security`, `correctness`, `reliability`, `architecture`, `tests`, `tech-debt`, `performance`, `infrastructure`)
 - `kebab-title`: finding title lowercased, spaces and special characters replaced by hyphens, consecutive hyphens collapsed
 - Example: category "Security", title "Hardcoded secrets" → `security/hardcoded-secrets`
 - Example: category "Tech Debt", title "TODO/FIXME/HACK markers" → `tech-debt/todo-fixme-hack-markers`
@@ -883,6 +905,10 @@ Print:
 - **`--format sarif` findings without file locations**: Result omits `locations` array. Valid SARIF, but GitHub renders these less usefully.
 - **`--format sarif` in non-git repo**: File paths are relative to `pwd` instead of git root.
 - **`--format <invalid>`**: Error: "Unsupported format: `{value}`. Supported formats: `json`, `sarif`." Stop immediately.
+- **Infrastructure scanning with no infra files detected**: Skipped entirely. No Infrastructure row in the summary table, no noise in the report.
+- **Infrastructure scanning with missing infra checklist file**: WARN: "Infrastructure checklist not found — skipping infra patterns." Continue the audit without infra patterns.
+- **`--no-infra` with infra files present**: Respected. Infrastructure scanning is skipped. Note in Tips block: "Infrastructure files detected but scanning was disabled via `--no-infra`."
+- **`--quick` with infra files**: Runs `[QUICK]`-tagged infra patterns (FROM latest, running as root, privileged containers) alongside existing quick patterns.
 
 ---
 

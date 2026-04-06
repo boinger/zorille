@@ -134,3 +134,54 @@ describe("General patterns", () => {
     expect(re.test("https://api.example.com/v1")).toBe(true);
   });
 });
+
+describe("Infrastructure patterns", () => {
+  test("unpinned base image", () => {
+    const re = /(?:^FROM\s+\S+:latest\b|^FROM\s+\w+\s*$)/im;
+    expect(re.test("FROM node:latest")).toBe(true);
+    expect(re.test("FROM ubuntu")).toBe(true);
+    // Good: pinned version
+    expect(re.test("FROM node:18-alpine")).toBe(false);
+  });
+
+  test("privileged container", () => {
+    const re = /privileged:\s*true/;
+    expect(re.test("privileged: true")).toBe(true);
+    expect(re.test("  privileged: true")).toBe(true);
+    // Good: not privileged
+    expect(re.test("privileged: false")).toBe(false);
+  });
+
+  test("unpinned GitHub Action", () => {
+    const re = /uses:\s+\S+@(main|master)\b/;
+    expect(re.test("uses: actions/checkout@main")).toBe(true);
+    expect(re.test("uses: actions/setup-node@master")).toBe(true);
+    // Good: pinned to SHA
+    expect(re.test("uses: actions/checkout@a1b2c3d4e5f6")).toBe(false);
+  });
+
+  test("public S3 bucket", () => {
+    const re = /acl\s*=\s*"public/i;
+    expect(re.test('acl = "public-read"')).toBe(true);
+    expect(re.test('acl = "public-read-write"')).toBe(true);
+    // Good: private
+    expect(re.test('acl = "private"')).toBe(false);
+  });
+
+  test("secrets in GitHub Actions run blocks", () => {
+    const re = /\$\{\{\s*secrets\./;
+    expect(re.test("${{ secrets.API_KEY }}")).toBe(true);
+    expect(re.test("${{secrets.TOKEN}}")).toBe(true);
+    // Good: env reference (not directly in run)
+    expect(re.test("${{ env.API_KEY }}")).toBe(false);
+  });
+
+  test("weak TLS protocols", () => {
+    const re = /ssl_protocols\s+.*(?:SSLv3|TLSv1\.0|TLSv1\.1)/;
+    expect(re.test("ssl_protocols SSLv3 TLSv1.0 TLSv1.1 TLSv1.2;")).toBe(true);
+    expect(re.test("ssl_protocols TLSv1.0 TLSv1.1;")).toBe(true);
+    expect(re.test("ssl_protocols TLSv1.1;")).toBe(true);
+    // Good: modern only
+    expect(re.test("ssl_protocols TLSv1.2 TLSv1.3;")).toBe(false);
+  });
+});

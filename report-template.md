@@ -10,7 +10,7 @@
 | **LOC** | {LOC} |
 | **Files** | {FILE_COUNT} |
 | **Test Files** | {TEST_FILE_COUNT} |
-| **Mode** | {MODE} (may include `--suggest-fixes`, `--quick-fix`, `--changed-only`, `--ci`, `--json`, `--format sarif`, `--min-severity`) |
+| **Mode** | {MODE} (may include `--suggest-fixes`, `--quick-fix`, `--changed-only`, `--ci`, `--json`, `--format sarif`, `--min-severity`, `--no-infra`) |
 | **Duration** | {DURATION} |
 
 {CHANGED_ONLY_SECTION_START}
@@ -72,6 +72,7 @@ Note: This is a scoped audit. Only changed files were analyzed. Run a full `/cod
 | Tests | {N} | {N} | {N} | {N} |
 | Tech Debt | {N} | {N} | {N} | {N} |
 | Performance | {N} | {N} | {N} | {N} |
+| Infrastructure | {N} | {N} | {N} | {N} |
 | **Total** | **{N}** | **{N}** | **{N}** | **{N}** |
 
 ## Top 5 Priorities

@@ -98,6 +98,13 @@ describe("Skill structure validation", () => {
     expect(skillMd).toContain("results.sarif");
   });
 
+  test("has infrastructure scanning documentation", () => {
+    expect(skillMd).toContain("--no-infra");
+    expect(skillMd).toContain("infra-checklist.md");
+    expect(skillMd).toContain("skipping infra patterns");
+    expect(skillMd).toContain("Infrastructure files detected");
+  });
+
   test("has voice directive", () => {
     expect(skillMd).toContain("## Voice");
   });

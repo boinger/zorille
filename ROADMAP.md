@@ -116,7 +116,7 @@ Rough implementation priority based on user value and complexity:
 3. ~~`--ci` + `--json` + `--min-severity` — CI/automation pipeline~~ **SHIPPED v1.3.0**
 4. Focused modes (`--security-only` etc.) — low complexity, high value
 5. ~~SARIF output format (`--format sarif`) — industry standard for static analysis~~ **SHIPPED v1.4.0**
-6. `--plus-infra` — new scan surface, medium complexity
+6. ~~`--plus-infra` — infrastructure scanning~~ **SHIPPED v1.5.0** (auto-detect, `--no-infra` opt-out, 16 patterns)
 7. `--plan-fixes` — refinement of existing plan output
 8. GitHub Action wrapper — turnkey CI integration
 9. Schema backward compatibility policy documentation

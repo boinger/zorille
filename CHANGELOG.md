@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.5.0] - 2026-04-06
+
+### Features
+
+- **Infrastructure scanning** (automatic): Auto-detects Dockerfiles, K8s manifests, Terraform, GitHub Actions, docker-compose, and nginx configs. Scans with 16 high-signal grep patterns when infra files are present. Use `--no-infra` to opt out.
+  - Docker: unpinned base images, running as root, secrets in build args, ADD vs COPY
+  - Kubernetes: privileged containers, host networking
+  - Terraform: overly permissive IAM, public S3 buckets, hardcoded credentials
+  - CI/CD: unpinned actions, pull_request_target injection, secrets in run blocks
+  - Docker Compose: privileged mode, unbound ports
+  - nginx: server tokens, weak TLS
+- Infrastructure findings compete on severity with app findings for the 50-finding cap
+- K8s detection covers `k8s/`, `deploy/` directories and Helm `Chart.yaml`
+
 ## [1.4.0] - 2026-04-06
 
 ### Features

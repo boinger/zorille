@@ -279,3 +279,53 @@ describe("E2E: SARIF format documentation completeness", () => {
     expect(template).toContain("--format sarif");
   });
 });
+
+describe("E2E: Infrastructure checklist", () => {
+  test("references/infra-checklist.md exists and has content", () => {
+    const content = fs.readFileSync(
+      path.join(ROOT, "references", "infra-checklist.md"),
+      "utf-8",
+    );
+    expect(content.length).toBeGreaterThan(50);
+  });
+
+  test("infra checklist has [QUICK] tagged patterns", () => {
+    const content = fs.readFileSync(
+      path.join(ROOT, "references", "infra-checklist.md"),
+      "utf-8",
+    );
+    expect(content).toContain("[QUICK]");
+  });
+
+  test("infra checklist has Infrastructure category", () => {
+    const content = fs.readFileSync(
+      path.join(ROOT, "references", "infra-checklist.md"),
+      "utf-8",
+    );
+    expect(content).toContain("### Infrastructure");
+  });
+
+  test("infra checklist patterns compile as valid regex", () => {
+    const content = fs.readFileSync(
+      path.join(ROOT, "references", "infra-checklist.md"),
+      "utf-8",
+    );
+    const patterns: { pattern: string; label: string }[] = [];
+    for (const line of content.split("\n")) {
+      const match = line.match(/[—–-]\s*`([^`]+)`\s*[—–-]/);
+      if (match) {
+        patterns.push({ pattern: match[1], label: line.trim().slice(0, 80) });
+      }
+    }
+    expect(patterns.length).toBeGreaterThanOrEqual(10);
+    for (const { pattern, label } of patterns) {
+      const hasRgOnlySyntax = /\(\?[imsx]/.test(pattern);
+      if (hasRgOnlySyntax) {
+        const stripped = pattern.replace(/\(\?[imsx]\)/g, "");
+        expect(() => new RegExp(stripped)).not.toThrow();
+      } else {
+        expect(() => new RegExp(pattern)).not.toThrow();
+      }
+    }
+  });
+});
