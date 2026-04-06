@@ -230,3 +230,52 @@ describe("E2E: report template supports CI mode", () => {
     expect(template).toContain("--ci");
   });
 });
+
+describe("E2E: SARIF format documentation completeness", () => {
+  const skillMd = fs.readFileSync(path.join(ROOT, "SKILL.md"), "utf-8");
+
+  test("SARIF schema structure is documented", () => {
+    expect(skillMd).toContain('"version": "2.1.0"');
+    expect(skillMd).toContain("tool.driver.rules");
+    expect(skillMd).toContain("ruleId");
+    expect(skillMd).toContain("physicalLocation");
+  });
+
+  test("severity mapping is documented", () => {
+    expect(skillMd).toContain('`"error"`');
+    expect(skillMd).toContain('`"warning"`');
+    expect(skillMd).toContain('`"note"`');
+    expect(skillMd).toContain("security-severity");
+  });
+
+  test("rule ID construction is documented", () => {
+    expect(skillMd).toContain("{category}/{kebab-title}");
+  });
+
+  test("file path normalization is documented", () => {
+    expect(skillMd).toContain("uriBaseId");
+    expect(skillMd).toContain("%SRCROOT%");
+    expect(skillMd).toContain("forward slashes only");
+  });
+
+  test("message structure separates title from recommendation", () => {
+    expect(skillMd).toContain("finding title only");
+    expect(skillMd).toContain("fullDescription");
+  });
+
+  test("SARIF composes with CI mode", () => {
+    expect(skillMd).toContain("--ci --format sarif");
+  });
+
+  test("invalid format value is handled", () => {
+    expect(skillMd).toContain("Unsupported format");
+  });
+
+  test("report template supports --format sarif", () => {
+    const template = fs.readFileSync(
+      path.join(ROOT, "report-template.md"),
+      "utf-8",
+    );
+    expect(template).toContain("--format sarif");
+  });
+});

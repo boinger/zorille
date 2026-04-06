@@ -84,10 +84,18 @@ describe("Skill structure validation", () => {
     expect(skillMd).toContain("--fail-on-regression");
     expect(skillMd).toContain("--fail-on-new");
     expect(skillMd).toContain("--min-severity");
-    expect(skillMd).toContain("### 4.8 CI exit");
+    expect(skillMd).toContain("### 4.8 Structured output");
     expect(skillMd).toContain("AskUserQuestion is NEVER called");
     expect(skillMd).toContain("cat <<'EOF'");
     expect(skillMd).toContain("ci-output.json");
+  });
+
+  test("has SARIF format documentation", () => {
+    expect(skillMd).toContain("--format sarif");
+    expect(skillMd).toContain("SARIF 2.1.0");
+    expect(skillMd).toContain("sarif-schema-2.1.0");
+    expect(skillMd).toContain("%SRCROOT%");
+    expect(skillMd).toContain("results.sarif");
   });
 
   test("has voice directive", () => {

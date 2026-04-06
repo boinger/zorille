@@ -1,6 +1,6 @@
 ---
 name: codebase-audit
-version: 1.3.0
+version: 1.4.0
 description: |
   Full codebase audit. Analyzes an entire project cold, no diff, no branch context,
   producing a structured report covering bugs, security issues, architectural problems,
@@ -81,6 +81,13 @@ Detect the mode from arguments:
   - `--quick-fix`: IGNORED, noted in `metadata.ignored_flags`
 - **JSON** (`--json`): Structured JSON output to stdout. Same format as `--ci` but without exit codes or fail thresholds. Status is always "pass". No plan file written. AskUserQuestion suppressed. Can be used standalone for dashboards, scripts, or tooling integration.
 - **Severity Filter** (`--min-severity <level>`): Filters findings in output to only those at or above the specified severity: `critical`, `important`, or `notable`. Does NOT affect health score calculation (score always counts all findings). Applies to report, conversation summary, and CI JSON `findings` array.
+- **Format** (`--format sarif`): SARIF 2.1.0 output for GitHub Code Scanning and compatible static analysis tools. Implies `--json` behavior (no interactive prompts, no plan file). Outputs SARIF to stdout and writes to `$AUDIT_HOME/$SLUG/audits/{dt}-results.sarif`. Mode compatibility:
+  - `--ci`: YES — replaces JSON with SARIF, same exit code semantics
+  - `--changed-only`: YES — scoped SARIF
+  - `--min-severity`: YES — filtered results and rules arrays
+  - `--quick`: YES
+  - `--suggest-fixes` / `--quick-fix`: IGNORED
+  - `--format json`: Default (implicit). Explicit `--format json` is accepted but no-op.
 
 ## Arguments
 
@@ -98,6 +105,9 @@ Detect the mode from arguments:
 - `/codebase-audit --ci --fail-on-new` — fail only on new findings vs baseline
 - `/codebase-audit --json` — JSON output without CI exit-code behavior
 - `/codebase-audit --min-severity important` — show only important+ findings
+- `/codebase-audit --format sarif` — SARIF 2.1.0 output for GitHub Code Scanning
+- `/codebase-audit --ci --format sarif` — CI mode with SARIF output
+- `/codebase-audit --ci --format sarif --changed-only` — scoped CI check with SARIF
 
 ---
 
@@ -479,7 +489,7 @@ If no previous baseline exists, skip regression comparison.
 
 ### 4.6 Conversation summary
 
-If `--ci` or `--json` is active, replace the human-readable conversation summary with JSON construction. Progress messages during Phases 1-3 go to stderr (`echo '...' >&2`). The JSON is NOT emitted here — data is assembled for Phase 4.8. If `--min-severity` is active, filter the findings array and conversation summary to only include findings at or above the specified severity level.
+If `--ci`, `--json`, or `--format sarif` is active, replace the human-readable conversation summary with structured output construction. Progress messages during Phases 1-3 go to stderr (`echo '...' >&2`). The output is NOT emitted here — data is assembled for Phase 4.8. If `--format sarif` is active, data is assembled for SARIF emission instead of JSON. If `--min-severity` is active, filter the findings array and conversation summary to only include findings at or above the specified severity level.
 
 Otherwise, print a summary directly to the conversation. This is what the user sees immediately:
 
@@ -580,25 +590,31 @@ Options:
 - **A) Apply fixes now** (recommended)
 - **B) I want to review the plan first**
 
-### 4.8 CI exit
+### 4.8 Structured output
 
-Skip unless `--ci` or `--json` is active.
+Skip unless `--ci`, `--json`, or `--format sarif` is active.
 
-**Build the CI JSON from baseline.json:** Read the baseline written in Phase 4.4 and augment with CI-specific fields:
-- `status`: "pass" or "fail" (always "pass" for `--json` without `--ci`)
+If `--format` is specified with an unsupported value (anything other than `json` or `sarif`), error: "Unsupported format: `{value}`. Supported formats: `json`, `sarif`." and stop.
+
+#### 4.8.1 Build output data from baseline
+
+Read the baseline written in Phase 4.4 and augment with output-specific fields:
+- `status`: "pass" or "fail" (always "pass" for `--json` or `--format sarif` without `--ci`)
 - `threshold`: the `--fail-on` level (default: "critical")
 - `findings_above_threshold`: count of findings at or above threshold
 - `findings_count`: total findings count (for truncation detection)
 - `metadata.schema_version`: "1.0"
 - `metadata.tool_version`: read from VERSION file
 - `metadata.duration_seconds`: elapsed time since audit start
-- `metadata.mode`: "ci" or "json"
+- `metadata.mode`: "ci", "json", or "sarif"
 - `metadata.flags`: array of invocation flags used
 - `metadata.ignored_flags`: array of suppressed flags (e.g., `--suggest-fixes` in CI mode)
 
 If `--min-severity` is active, filter the `findings` array to only include findings at or above the specified severity. `findings_count` reflects the filtered count. Health score and `summary` are NOT filtered (they reflect full audit). Note: this means `summary.total` and `findings_count` may differ when `--min-severity` is used — this is intentional (`summary` = full audit picture, `findings` array = filtered view).
 
-**Determine pass/fail** (skip for `--json` without `--ci`):
+#### 4.8.2 Determine pass/fail
+
+Skip for `--json` or `--format sarif` without `--ci`.
 
 1. Count findings at or above the `--fail-on` threshold (default: `critical`)
    - `--fail-on critical`: fail if any critical findings
@@ -607,7 +623,103 @@ If `--min-severity` is active, filter the `findings` array to only include findi
 3. If `--fail-on-new` and a previous baseline exists: count only findings whose IDs are NOT in the previous baseline. Fail if any new findings at or above `--fail-on` threshold. No baseline → fall back to normal threshold.
 4. Set `status` to `"pass"` or `"fail"`
 
-**Emit JSON** via single-quoted heredoc to prevent shell expansion:
+#### 4.8.3 Emit output
+
+**If `--format sarif` is active:**
+
+Construct a SARIF 2.1.0 document. Follow this structure exactly:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "codebase-audit",
+          "semanticVersion": "{tool_version}",
+          "informationUri": "https://github.com/boinger/codebase-audit",
+          "rules": [
+            {
+              "id": "{category}/{kebab-title}",
+              "shortDescription": { "text": "{finding title}" },
+              "fullDescription": { "text": "{recommendation}" },
+              "defaultConfiguration": { "level": "{error|warning|note}" },
+              "properties": { "security-severity": "{9.0|7.0|4.0|1.0}" }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "{category}/{kebab-title}",
+          "level": "{error|warning|note}",
+          "message": { "text": "{finding title}" },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "{relative/file/path}",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": { "startLine": "{line_number}" }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Rule ID construction:** For each finding, construct the rule ID as `{category}/{kebab-title}`:
+- `category`: lowercase finding category (`security`, `correctness`, `reliability`, `architecture`, `tests`, `tech-debt`, `performance`)
+- `kebab-title`: finding title lowercased, spaces and special characters replaced by hyphens, consecutive hyphens collapsed
+- Example: category "Security", title "Hardcoded secrets" → `security/hardcoded-secrets`
+- Example: category "Tech Debt", title "TODO/FIXME/HACK markers" → `tech-debt/todo-fixme-hack-markers`
+
+**Rules deduplication:** Multiple findings may share the same rule ID (e.g., two "empty catch blocks" in different files). Declare each unique rule ID exactly once in `tool.driver.rules[]`. Each finding becomes a separate entry in `results[]`.
+
+**Message structure:** `message.text` contains the finding title only (renders inline on code in GitHub). The recommendation goes in `rule.fullDescription.text` (visible when clicking through to finding detail). This keeps inline annotations clean.
+
+**Severity mapping:**
+
+| Audit severity | SARIF `level` | `security-severity` |
+|---|---|---|
+| Critical | `"error"` | `"9.0"` |
+| Important | `"warning"` | `"7.0"` |
+| Worth noting | `"note"` | `"4.0"` |
+| Opportunity | `"note"` | `"1.0"` |
+
+**File path normalization:** All `uri` values must be relative to the repository root with forward slashes only and no leading `./`. Compute the git root:
+
+```bash
+GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+```
+
+Strip the git root prefix from each finding's file path. If not a git repo, paths are relative to `pwd`.
+
+**Non-file findings:** Findings that reference components or patterns rather than specific files (e.g., "missing integration tests") should use the most relevant file as the location. If no file is applicable, omit the `locations` array for that result — SARIF permits results without locations, though GitHub renders these less usefully.
+
+**If `--min-severity` is active:** Filter both the `results` array and the `rules` array. Only include rules that are referenced by at least one included result.
+
+**Emit SARIF** via single-quoted heredoc to prevent shell expansion:
+
+```bash
+cat <<'EOF'
+{ ... the SARIF JSON ... }
+EOF
+```
+
+**Write SARIF to file:** `$AUDIT_HOME/$SLUG/audits/{dt}-results.sarif`
+
+Upload to GitHub Code Scanning with: `github/codeql-action/upload-sarif@v3`
+
+**Otherwise (default JSON format):**
+
+Emit JSON via single-quoted heredoc to prevent shell expansion:
 
 ```bash
 cat <<'EOF'
@@ -615,9 +727,11 @@ cat <<'EOF'
 EOF
 ```
 
-**Write JSON to file:** Also write the JSON to `$AUDIT_HOME/$SLUG/audits/{dt}-ci-output.json` as a file-based fallback for CI systems that have trouble capturing stdout.
+Write JSON to file: `$AUDIT_HOME/$SLUG/audits/{dt}-ci-output.json`
 
-**Exit** (`--ci` only):
+#### 4.8.4 Exit
+
+`--ci` only — skip for `--json` or `--format sarif` without `--ci`:
 
 ```bash
 exit 0  # pass
@@ -629,7 +743,7 @@ or:
 exit 1  # fail
 ```
 
-CI consumers SHOULD parse the JSON `status` field as the primary signal. The `exit 0`/`exit 1` from the Bash block is a convenience — it exits the Bash subprocess, not the Claude Code session, and may not propagate to the CI runner's exit code depending on how Claude Code is invoked.
+CI consumers SHOULD parse the JSON `status` field (or SARIF results) as the primary signal. The `exit 0`/`exit 1` from the Bash block is a convenience — it exits the Bash subprocess, not the Claude Code session, and may not propagate to the CI runner's exit code depending on how Claude Code is invoked.
 
 Do not proceed to Phase 5 in `--ci` mode.
 
@@ -763,6 +877,12 @@ Print:
 - **`--json` without `--ci`**: JSON output, no exit codes, no plan file written, AskUserQuestion suppressed. Status is always "pass".
 - **`--min-severity` does not affect health score**: Score always counts all findings. `summary` reflects full audit. `findings` array and `findings_count` are filtered. `summary.total` and `findings_count` may differ — this is intentional.
 - **`--fail-on-new` without baseline**: Falls back to normal threshold behavior (compares against all findings, not just new ones).
+- **`--format sarif` with `--suggest-fixes`/`--quick-fix`**: IGNORED. SARIF does not carry inline diffs.
+- **`--format sarif` standalone (no `--ci`)**: SARIF to stdout, no exit codes. Equivalent to `--json` but in SARIF format.
+- **`--format sarif` with `--min-severity`**: Filters both `results` and `rules` arrays. Only rules referenced by included results are declared.
+- **`--format sarif` findings without file locations**: Result omits `locations` array. Valid SARIF, but GitHub renders these less usefully.
+- **`--format sarif` in non-git repo**: File paths are relative to `pwd` instead of git root.
+- **`--format <invalid>`**: Error: "Unsupported format: `{value}`. Supported formats: `json`, `sarif`." Stop immediately.
 
 ---
 
@@ -784,3 +904,4 @@ Print:
 14. **NEVER use Grep in `content` mode during checklist execution.** Always use `files_with_matches` mode. If a regex returns more than ~20 lines, the pattern is too broad — use `files_with_matches` to get filenames, then Read specific line ranges. Multiline regex patterns (e.g., patterns matching across `{` `}` boundaries) are especially dangerous and must NEVER be run in content mode.
 15. When `--suggest-fixes` is active, generate diffs during Phase 3 immediately after confirming each finding — not batched at the end of Phase 3, not retroactively in Phase 4. The code context from the Read that confirmed the finding is essential for accurate diffs. Each diff must be a minimal, conservative change. Never suggest refactoring beyond the specific finding. If a finding cannot be fixed with a short diff, mark it accordingly rather than forcing a bad suggestion. The unified diff format enables `--quick-fix` (Phase 5) to parse and apply diffs mechanically.
 16. `--quick-fix` implies `--suggest-fixes`. If the user passes `--quick-fix` without `--suggest-fixes`, activate suggest-fixes behavior automatically. Quick-fix requires diffs to apply.
+17. When `--format sarif` is active, rule IDs must be deterministic (`{category}/{kebab-title}`) and declared in `tool.driver.rules[]` before being referenced in `results[]`. File paths must be relative to the git root with forward slashes and no leading `./`. Use `%SRCROOT%` as the `uriBaseId`. `message.text` contains the title only; `rule.fullDescription.text` contains the recommendation.

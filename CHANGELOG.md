@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.4.0] - 2026-04-06
+
+### Features
+
+- **SARIF output** (`--format sarif`): SARIF 2.1.0 output for GitHub Code Scanning and compatible static analysis tools. Rule IDs are human-readable (`category/kebab-title`). Severity maps to SARIF levels with `security-severity` scores.
+  - Composes with `--ci` (replaces JSON, same exit codes), `--changed-only`, `--min-severity`, `--quick`
+  - Written to `$AUDIT_HOME/$SLUG/audits/{dt}-results.sarif` and stdout
+  - Upload with `github/codeql-action/upload-sarif@v3`
+  - `message.text` = title only (clean inline annotations); `rule.fullDescription.text` = recommendation (click-through detail)
+  - Invalid `--format` values produce a clear error with supported formats listed
+
 ## [1.3.0] - 2026-04-04
 
 ### Features
