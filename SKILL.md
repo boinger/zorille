@@ -1,6 +1,6 @@
 ---
 name: codebase-audit
-version: 1.7.0
+version: 1.8.0
 description: |
   Full codebase audit. Analyzes an entire project cold, no diff, no branch context,
   producing a structured report covering bugs, security issues, architectural problems,
@@ -90,6 +90,15 @@ Detect the mode from arguments:
   - `--suggest-fixes` / `--quick-fix`: IGNORED
   - `--format json`: Default (implicit). Explicit `--format json` is accepted but no-op.
 - **Infrastructure Scanning** (automatic): When infrastructure files are detected in Phase 1.2 (Dockerfiles, K8s manifests, Terraform, GitHub Actions, docker-compose, nginx configs), infrastructure patterns are loaded and scanned automatically as an 8th category. Use `--no-infra` to opt out. Infrastructure findings compete on severity with application findings for the 50-finding cap.
+- **Plan Fixes** (`--plan-fixes`): Transforms audit findings into grouped, review-ready fix plan files with an LLM-native depth dial. Mechanical findings get grouped plans. Substantive findings get deeper investigation (callers, tests, adjacent code) after consent. Plans are written to `$AUDIT_HOME/$SLUG/plans/` and a menu lets the user select which to act on. Compatible with `/autoplan`, manual review, or standalone use. Mode compatibility:
+  - Full: YES (default use case)
+  - Regression: YES
+  - Changed-only: YES (plans scoped to changed files)
+  - Quick: IGNORED (quick mode has insufficient context for plans)
+  - CI/JSON/SARIF: IGNORED (structured output, not plans)
+  - Suggest-fixes: YES (diffs included in mechanical group plans)
+  - Quick-fix: YES (plans generated first, then mechanical fixes applied and marked `[AUTO-APPLIED]`)
+  - `--thorough`: auto-dive on all substantive findings without consent prompt
 
 ## Arguments
 
@@ -111,6 +120,8 @@ Detect the mode from arguments:
 - `/codebase-audit --ci --format sarif` — CI mode with SARIF output
 - `/codebase-audit --ci --format sarif --changed-only` — scoped CI check with SARIF
 - `/codebase-audit --ci --baseline-only` — establish baseline, always passes (for CI onboarding)
+- `/codebase-audit --plan-fixes` — grouped fix plans with depth-aware investigation (asks consent before diving deep on substantive findings)
+- `/codebase-audit --plan-fixes --thorough` — auto-dive on all substantive findings without consent prompt
 - `/codebase-audit --no-infra` — skip infrastructure scanning even if infra files are present
 
 ---
@@ -531,11 +542,149 @@ Otherwise, print a summary directly to the conversation. This is what the user s
     - If this is a full audit (not `--changed-only`), on a non-default branch, with >20 findings: "Use `--changed-only` to audit only files changed on this branch."
     - If `--no-infra` was used but infrastructure files were detected: "Infrastructure files detected but scanning was disabled via `--no-infra`."
     - If `--ci` is active and no previous baseline exists and `--baseline-only` is NOT active: "First CI run on this codebase. Use `--baseline-only` to establish a baseline without failing, then `--fail-on-new` for ongoing runs."
+    - If audit found substantive findings and `--plan-fixes` was not used: "Use `--plan-fixes` for grouped fix plans with depth investigation, or `--plan-fixes --thorough` for maximum analysis."
     - If no tips are applicable, omit the Tips block entirely.
 
 ### 4.7 Write the Fix Plan
 
 Skip this phase if `--ci` is active (no plan file). In `--json` mode without `--ci`, also skip the plan file. AskUserQuestion is never called in `--ci` or `--json` mode.
+
+**If `--plan-fixes` is active, follow sub-steps 4.7.1 through 4.7.7 instead of the default flat plan output below.** Otherwise, proceed with the default behavior.
+
+#### 4.7.1 Group findings (only when `--plan-fixes` is active)
+
+Cluster findings into PR-sized groups using this heuristic:
+
+1. **Same file** → same group
+2. **Same checklist pattern + same top-level directory** (first path component, e.g., `src/`, `config/`) → same group
+3. **Monorepo degeneracy guard**: If the first path component contains >60% of findings (common in monorepos where everything is under `src/`), use the second path component instead
+4. **Max 8 findings per group, max 5 files per group**. Overflow creates additional groups labeled "Part N of M for {scope}" (e.g., "Part 2 of 3 for src/auth.ts")
+5. **Orphan findings** (no grouping affinity) get their own single-finding plan file. No minimum group size.
+
+Number groups sequentially (1, 2, 3...). This number will be used for both the filename and the menu. "Part X of Y" splits take consecutive numbers (e.g., group 3 part 1 = plan #3, part 2 = plan #4).
+
+#### 4.7.2 Classify group depth (only when `--plan-fixes` is active)
+
+For each group:
+- **All-mechanical group**: shallow plan (no extra investigation needed)
+- **Contains ≥1 substantive finding**: flag for depth investigation
+
+#### 4.7.3 Depth consent (only when `--plan-fixes` is active, skip if `--thorough`)
+
+If any groups are flagged for depth investigation, use AskUserQuestion:
+
+> "N groups contain substantive findings that benefit from deeper investigation (reading callers, tests, and adjacent code). This costs approximately 2-3 extra Read calls per finding, up to 10 findings. Proceed?"
+
+Options:
+- **A) Yes, investigate deeper** — proceed to 4.7.4
+- **B) No, generate shallow plans** — skip 4.7.4, all groups get shallow plans
+
+If `--thorough` is active, skip this consent and proceed directly to 4.7.4.
+
+#### 4.7.4 Depth investigation (only when `--plan-fixes` is active, consent granted or `--thorough`)
+
+Select substantive findings for investigation: highest severity first, then order of occurrence. **Cap at 10 findings per session.** Un-investigated substantive findings in an otherwise-investigated group get shallow entries in that group's plan, with a note: "Investigation deferred due to session cap."
+
+For each selected finding:
+
+**Find callers:**
+1. Prefer the fully-qualified name (`ClassName.method` or `module.function`) when available
+2. If only a bare name is available and it is <6 characters OR a language keyword (function, class, def, return, import, etc.), **skip caller analysis** and note: "Skipped caller analysis: function name too common."
+3. Otherwise, Grep in `files_with_matches` mode for the name
+4. Read the top 3 callers by file proximity to the finding (same directory first, then parent directory, then sibling directories)
+5. Note in the plan: "Caller analysis is grep-based and may be incomplete — dynamic dispatch, reflection, and inheritance are not traced."
+
+**Check tests** using this prioritized pattern list:
+1. Co-located `.test.` or `.spec.` suffix (e.g., `foo.test.ts` for `foo.ts`)
+2. Co-located `test_` prefix (e.g., `test_foo.py` for `foo.py`)
+3. Parallel `__tests__/` directory mirroring source structure
+4. Parallel `tests/` directory mirroring source structure
+5. Java-style `src/test/` mirror of `src/main/`
+
+If found, Read the relevant sections and note coverage gaps. If no test file found, note: "No test file found for this source file."
+
+**Examine context:**
+1. Attempt to read the entire containing function. Detect boundaries using bracket matching (C-family) or indentation level (Python).
+2. Fallback: read 50 lines centered on the finding (25 above, 25 below) if function boundaries cannot be determined.
+
+**Synthesize** investigation results into finding-specific notes. The group's plan file will have one `### Finding N: {title}` sub-section per investigated finding in the Approach section.
+
+#### 4.7.5 Generate plan files (only when `--plan-fixes` is active)
+
+Write one markdown plan per group to `$AUDIT_HOME/$SLUG/plans/{datetime}-{N}-{slugified-title}.md`. Use format `YYYY-MM-DD-HHMMSS` for `{datetime}`. Slugify the title (lowercase, spaces→hyphens, strip special chars).
+
+**Maintain a running file-set tracker** across plan generation: record every file mentioned in "Files to Modify" for each plan. When generating Plan B, check if any of its files appear in previous plans' file sets. If so, list those plans under Dependencies.
+
+**Plan template:**
+
+```markdown
+# Fix Plan: {group title}
+
+## Context
+{Why this group exists — the finding(s) and their impact}
+
+## Findings
+| # | Severity | Title | File | Line |
+|---|----------|-------|------|------|
+{table of findings in this group}
+
+## Approach
+
+{For shallow plans (all mechanical or investigation not done):}
+{Single narrative or per-finding one-line approach}
+
+{For deep plans (investigated findings):}
+### Finding 1: {title}
+{Investigation notes: callers, tests, context, recommended fix}
+
+### Finding 2: {title}
+{...}
+
+{For un-investigated findings in a partially-investigated group:}
+### Finding N: {title}
+{One-line approach. Note: "Investigation deferred due to session cap."}
+
+## Files to Modify
+- {file}: {what changes}
+
+## Risk
+**{Low|Medium|High}** — {rubric-based justification}
+
+Rubric:
+- **High**: 3+ callers affected OR test coverage gap for the affected path OR multi-file change
+- **Medium**: single file with tests present but finding is non-trivial
+- **Low**: isolated change with clear, passing tests
+
+## Verify & Rollback
+- Run: {test command}
+- Check: {grep pattern or manual verification}
+- Rollback: `git revert <commit-hash>` after applying, or revert specific file changes
+
+## Dependencies
+{Other fix plans (by number) that touch files this plan modifies, e.g., "Plan #3 also modifies src/auth.ts"}
+{If none: "None detected."}
+```
+
+#### 4.7.6 Present plan menu (only when `--plan-fixes` is active)
+
+List all generated plans in the conversation with: number, title, finding count, severity distribution, depth level (shallow/deep).
+
+Use AskUserQuestion:
+
+> "Generated N fix plans. Which would you like to act on?"
+
+Options:
+- **A) Act on all** — proceed to plan execution for all plans
+- **B) Select by number** — user replies with comma-separated numbers (e.g., "1,3,5") as a text answer
+- **C) Skip** — plans are written to disk but user will act on them later
+
+For option B, after the user provides numbers, proceed with only the selected plans. If they reply with invalid numbers, note the invalid ones and proceed with the valid selections.
+
+#### 4.7.7 Post-Phase-5 AUTO-APPLIED marking (only when `--plan-fixes --quick-fix` is active)
+
+After Phase 5 applies mechanical fixes, re-read the plan files for groups whose findings were auto-applied. Prepend `[AUTO-APPLIED]` to the plan title in each affected file. This makes plan files a complete record of what was found AND what was done.
+
+**End of `--plan-fixes` sub-steps.** When `--plan-fixes` is NOT active, continue with the default flat plan output below.
 
 After printing the conversation summary, write the fix plan to the plan file. The audit is planning-for-a-plan — the plan file is the natural, actionable output.
 
@@ -917,6 +1066,14 @@ Print:
 - **`--baseline-only` with `--fail-on-new`**: ERROR — mutually exclusive. Use `--baseline-only` for the first run, then `--fail-on-new` for subsequent runs.
 - **`--baseline-only` with `--fail-on-regression`**: ERROR — mutually exclusive. `--baseline-only` always passes, so regression gating contradicts its purpose.
 - **`--baseline-only` re-run**: Overwrites the previous baseline. Idempotent and safe to re-run.
+- **`--plan-fixes` with `--ci`/`--json`**: IGNORED. CI mode emits structured output, not plans.
+- **`--plan-fixes` with `--quick`**: IGNORED. Quick mode has insufficient context for meaningful plan generation.
+- **`--plan-fixes --thorough`**: Auto-dive on all substantive findings without consent prompt. Still capped at 10 findings per session.
+- **`--plan-fixes --quick-fix`**: Generate plans first (including mechanical groups), then Phase 5 applies mechanical fixes and marks affected plan files `[AUTO-APPLIED]` in Phase 4.7.7.
+- **`--plan-fixes` with single file containing 15+ findings**: Split into groups labeled "Part N of M for {file}". Consecutive plan numbers.
+- **`--plan-fixes` with 0 substantive findings**: All groups get shallow plans. No consent prompt (nothing to consent to).
+- **`--plan-fixes` with 25+ substantive findings**: Investigate top 10 by severity. Remaining substantive findings get shallow entries with note: "Investigation deferred due to session cap."
+- **`--plan-fixes` with monorepo `src/` degeneracy**: If first path component contains >60% of findings, use second path component for grouping instead.
 - **`--format sarif` with `--suggest-fixes`/`--quick-fix`**: IGNORED. SARIF does not carry inline diffs.
 - **`--format sarif` standalone (no `--ci`)**: SARIF to stdout, no exit codes. Equivalent to `--json` but in SARIF format.
 - **`--format sarif` with `--min-severity`**: Filters both `results` and `rules` arrays. Only rules referenced by included results are declared.
@@ -938,7 +1095,7 @@ Print:
 4. No hallucinating findings. Every finding must reference a specific file and line (or component for non-code findings). If you can't point to it, don't report it.
 5. Use the severity calibration definitions exactly as specified. Do not inflate or deflate severity.
 6. In quick mode, respect the 2-minute target. Do not run Phase 2 or the full Phase 3 checklist. `--changed-only` also skips Phase 2 and does not write a baseline.
-7. AskUserQuestion fires in three places: (1) Phase 1 if >50K LOC, to scope the audit; (2) Phase 4.7 after the plan is written, to offer the next step; (3) Phase 5 (`--quick-fix` only) for dirty working tree check and commit proposal. In `--ci` or `--json` mode, AskUserQuestion is NEVER called — all decisions are made automatically. Do not use AskUserQuestion elsewhere during the audit.
+7. AskUserQuestion fires in five places: (1) Phase 1 if >50K LOC, to scope the audit; (2) Phase 4.7 after the plan is written, to offer the next step; (3) Phase 5 (`--quick-fix` only) for dirty working tree check and commit proposal; (4) Phase 4.7.3 depth consent (`--plan-fixes` only, unless `--thorough`); (5) Phase 4.7.6 plan menu (`--plan-fixes` only). In `--ci` or `--json` mode, AskUserQuestion is NEVER called — all decisions are made automatically. Do not use AskUserQuestion elsewhere during the audit.
 8. All bash blocks are self-contained. Do not rely on shell variables persisting between code blocks.
 9. When reading files for context, read enough surrounding lines to understand the code — do not make judgments from a single line in isolation.
 10. Cap detailed findings at 50. Summarize overflow in a table.

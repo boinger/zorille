@@ -10,7 +10,7 @@
 | **LOC** | {LOC} |
 | **Files** | {FILE_COUNT} |
 | **Test Files** | {TEST_FILE_COUNT} |
-| **Mode** | {MODE} (may include `--suggest-fixes`, `--quick-fix`, `--changed-only`, `--ci`, `--json`, `--format sarif`, `--min-severity`, `--no-infra`, `--baseline-only`) |
+| **Mode** | {MODE} (may include `--suggest-fixes`, `--quick-fix`, `--changed-only`, `--ci`, `--json`, `--format sarif`, `--min-severity`, `--no-infra`, `--baseline-only`, `--plan-fixes`, `--thorough`) |
 | **Duration** | {DURATION} |
 
 {CHANGED_ONLY_SECTION_START}

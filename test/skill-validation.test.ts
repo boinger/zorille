@@ -115,6 +115,58 @@ describe("Skill structure validation", () => {
     expect(skillMd).toContain("Infrastructure files detected");
   });
 
+  test("has plan-fixes documentation", () => {
+    expect(skillMd).toContain("--plan-fixes");
+    expect(skillMd).toContain("--thorough");
+    expect(skillMd).toContain("#### 4.7.1 Group findings");
+    expect(skillMd).toContain("#### 4.7.2 Classify group depth");
+    expect(skillMd).toContain("#### 4.7.3 Depth consent");
+    expect(skillMd).toContain("#### 4.7.4 Depth investigation");
+    expect(skillMd).toContain("#### 4.7.5 Generate plan files");
+    expect(skillMd).toContain("#### 4.7.6 Present plan menu");
+    expect(skillMd).toContain("#### 4.7.7 Post-Phase-5 AUTO-APPLIED marking");
+  });
+
+  test("has plan-fixes depth investigation patterns", () => {
+    expect(skillMd).toContain("Find callers");
+    expect(skillMd).toContain("Check tests");
+    expect(skillMd).toContain("Examine context");
+    expect(skillMd).toContain("fully-qualified name");
+    expect(skillMd).toContain("__tests__/");
+  });
+
+  test("has plan-fixes risk rubric", () => {
+    expect(skillMd).toContain("**High**: 3+ callers affected");
+    expect(skillMd).toContain("**Medium**: single file with tests");
+    expect(skillMd).toContain("**Low**: isolated change");
+  });
+
+  test("Key Rule 7 updated for plan-fixes AskUserQuestion locations", () => {
+    expect(skillMd).toContain("AskUserQuestion fires in five places");
+    expect(skillMd).toContain("Phase 4.7.3 depth consent");
+    expect(skillMd).toContain("Phase 4.7.6 plan menu");
+  });
+
+  test("plan-fixes tip added to Phase 4.6 Tips block", () => {
+    expect(skillMd).toContain(
+      "`--plan-fixes` for grouped fix plans",
+    );
+  });
+
+  test("plan-fixes edge cases are documented", () => {
+    // 0 substantive findings — no consent prompt
+    expect(skillMd).toContain("0 substantive findings");
+    // 15+ findings in single file — Part N of M split
+    expect(skillMd).toContain("15+ findings");
+    // 25+ substantive findings — investigation cap
+    expect(skillMd).toContain("25+ substantive findings");
+    // Monorepo degeneracy
+    expect(skillMd).toContain("monorepo `src/` degeneracy");
+    // --plan-fixes incompatible modes
+    expect(skillMd).toContain("`--plan-fixes` with `--ci`");
+    expect(skillMd).toContain("`--plan-fixes` with `--quick`");
+  });
+
   test("has voice directive", () => {
     expect(skillMd).toContain("## Voice");
   });

@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.8.0] - 2026-04-06
+
+### Features
+
+- **Plan-fixes mode** (`--plan-fixes`): Transforms audit findings into grouped, review-ready fix plan files with an LLM-native depth dial. Mechanical findings get grouped plans. Substantive findings get deeper investigation (callers, tests, adjacent code) after consent.
+  - **Depth investigation**: Traces callers via grep (prefers fully-qualified names, guards against common names), searches tests via 5-pattern priority list, reads containing function via bracket/indentation detection
+  - **Grouping heuristic**: Same file or same pattern + top-level dir, max 8 findings / 5 files per group, "Part N of M" overflow, monorepo degeneracy guard (60% rule)
+  - **Risk rubric**: Explicit criteria for High/Medium/Low based on callers, tests, and blast radius
+  - **`--thorough`**: Auto-dive on all substantive findings without consent prompt
+  - **Plans written to** `$AUDIT_HOME/$SLUG/plans/{datetime}-{N}-{slug}.md`
+  - **Plan menu**: Act on all / Select by number / Skip
+  - **Composes with `--quick-fix`**: Plans generated first, mechanical fixes applied in Phase 5, affected plans marked `[AUTO-APPLIED]` in Phase 4.7.7
+  - **Dependencies tracking**: File-overlap heuristic via running file-set tracker
+
 ## [1.7.0] - 2026-04-06
 
 ### Features

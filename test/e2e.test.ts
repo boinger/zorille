@@ -341,3 +341,53 @@ describe("E2E: Infrastructure checklist", () => {
     }
   });
 });
+
+describe("E2E: plan-fixes documentation completeness", () => {
+  const skillMd = fs.readFileSync(path.join(ROOT, "SKILL.md"), "utf-8");
+
+  test("plan template sections are documented", () => {
+    expect(skillMd).toContain("## Context");
+    expect(skillMd).toContain("## Findings");
+    expect(skillMd).toContain("## Approach");
+    expect(skillMd).toContain("## Files to Modify");
+    expect(skillMd).toContain("## Risk");
+    expect(skillMd).toContain("## Verify & Rollback");
+    expect(skillMd).toContain("## Dependencies");
+  });
+
+  test("grouping heuristic is documented", () => {
+    expect(skillMd).toContain("Max 8 findings per group");
+    expect(skillMd).toContain("max 5 files per group");
+    expect(skillMd).toContain("Part N of M");
+    expect(skillMd).toContain("monorepo");
+    expect(skillMd).toContain("60% of findings");
+  });
+
+  test("depth consent mechanism is documented", () => {
+    expect(skillMd).toContain("benefit from deeper investigation");
+    expect(skillMd).toContain("up to 10 findings");
+    expect(skillMd).toContain("skip this consent");
+  });
+
+  test("plan output path is documented", () => {
+    expect(skillMd).toContain("$AUDIT_HOME/$SLUG/plans/");
+  });
+
+  test("plan-fixes composes with quick-fix via AUTO-APPLIED", () => {
+    expect(skillMd).toContain("[AUTO-APPLIED]");
+    expect(skillMd).toContain("4.7.7");
+  });
+
+  test("caller grep guard is documented", () => {
+    expect(skillMd).toContain("Skipped caller analysis");
+  });
+
+  test("report template supports --plan-fixes", () => {
+    const template = fs.readFileSync(
+      path.join(ROOT, "report-template.md"),
+      "utf-8",
+    );
+    expect(template).toContain("--plan-fixes");
+    expect(template).toContain("--thorough");
+  });
+});
