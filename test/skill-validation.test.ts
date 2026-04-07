@@ -115,66 +115,120 @@ describe("Skill structure validation", () => {
     expect(skillMd).toContain("Infrastructure files detected");
   });
 
-  test("has plan-fixes documentation", () => {
+  test("has --plan-fixes alias flag preserved (v1.9.0 carve-out)", () => {
+    // The flag itself stays as a backward-compat alias.
     expect(skillMd).toContain("--plan-fixes");
     expect(skillMd).toContain("--thorough");
-    expect(skillMd).toContain("#### 4.7.1 Group findings");
-    expect(skillMd).toContain("#### 4.7.2 Classify group depth");
-    expect(skillMd).toContain("#### 4.7.3 Depth consent");
-    expect(skillMd).toContain("#### 4.7.4 Depth investigation");
-    expect(skillMd).toContain("#### 4.7.5 Generate plan files");
-    expect(skillMd).toContain("#### 4.7.6 Present plan menu");
-    expect(skillMd).toContain("#### 4.7.7 Post-Phase-5 AUTO-APPLIED marking");
+    // It's now documented as an alias, not inline logic.
+    expect(skillMd).toContain("alias");
+    expect(skillMd).toContain("/plan-fixes");
   });
 
-  test("has plan-fixes depth investigation patterns", () => {
-    expect(skillMd).toContain("Find callers");
-    expect(skillMd).toContain("Check tests");
-    expect(skillMd).toContain("Examine context");
-    expect(skillMd).toContain("fully-qualified name");
-    expect(skillMd).toContain("__tests__/");
+  test("Phase 4.7 dispatches to /plan-fixes sibling skill", () => {
+    // The dispatch directive must reference the sibling skill and --from
+    expect(skillMd).toMatch(/\/plan-fixes.*--from/s);
+    // Existence check for the sibling skill is documented
+    expect(skillMd).toContain("~/.claude/skills/plan-fixes");
+    // --thorough propagation is explicit
+    expect(skillMd).toContain("--thorough");
   });
 
-  test("has plan-fixes risk rubric", () => {
-    expect(skillMd).toContain("**High**: 3+ callers affected");
-    expect(skillMd).toContain("**Medium**: single file with tests");
-    expect(skillMd).toContain("**Low**: isolated change");
+  test("Phase 4.7 dispatch ordering under --quick-fix defers to Phase 5.5", () => {
+    // When --quick-fix is also active, the dispatch must happen after Phase 5.5
+    // so /plan-fixes sees the post-application baseline.
+    expect(skillMd).toContain("Phase 5.5");
+    expect(skillMd).toMatch(/quick_fix_status/);
   });
 
-  test("Key Rule 7 updated for plan-fixes AskUserQuestion locations", () => {
-    expect(skillMd).toContain("AskUserQuestion fires in five places");
-    expect(skillMd).toContain("Phase 4.7.3 depth consent");
-    expect(skillMd).toContain("Phase 4.7.6 plan menu");
+  test("Phase 5.5 baseline rewrite is documented", () => {
+    expect(skillMd).toContain("### 5.5 Rewrite baseline");
+    expect(skillMd).toContain("quick_fix_status");
+    // Option D requires this to be accurate post-application
+    expect(skillMd).toMatch(/atomically|temp file.*rename/i);
   });
 
-  test("plan-fixes tip added to Phase 4.6 Tips block", () => {
-    expect(skillMd).toContain(
-      "`--plan-fixes` for grouped fix plans",
-    );
+  test("alias dispatch failure is documented with recovery command", () => {
+    // The user must learn the audit succeeded and get a manual recovery path
+    expect(skillMd).toContain("Audit completed successfully");
+    expect(skillMd).toContain("Baseline written to");
+    expect(skillMd).toMatch(/\/plan-fixes --from/);
   });
 
-  test("plan-fixes edge cases are documented", () => {
-    // 0 substantive findings — no consent prompt
-    expect(skillMd).toContain("0 substantive findings");
-    // 15+ findings in single file — Part N of M split
-    expect(skillMd).toContain("15+ findings");
-    // 25+ substantive findings — investigation cap
-    expect(skillMd).toContain("25+ substantive findings");
-    // Monorepo degeneracy
-    expect(skillMd).toContain("monorepo `src/` degeneracy");
-    // --plan-fixes incompatible modes
+  test("Phase 4.6 tip points to standalone /plan-fixes", () => {
+    // The rewritten tip teaches the new skill name, not the alias
+    expect(skillMd).toContain("substantive findings");
+    expect(skillMd).toContain("/plan-fixes");
+    expect(skillMd).toContain("no re-audit needed");
+  });
+
+  test("SARIF discoverability tip fires after alias dispatch", () => {
+    expect(skillMd).toContain("SARIF 2.1.0");
+    expect(skillMd).toMatch(/--from results\.sarif/);
+  });
+
+  test("--plan-fixes edge cases are documented for alias behavior", () => {
     expect(skillMd).toContain("`--plan-fixes` with `--ci`");
     expect(skillMd).toContain("`--plan-fixes` with `--quick`");
+    expect(skillMd).toContain("`--plan-fixes --thorough`");
+    expect(skillMd).toContain("`--plan-fixes --quick-fix`");
+    expect(skillMd).toContain("`--plan-fixes` when `/plan-fixes` sibling skill is not installed");
+    expect(skillMd).toContain("`--thorough` without `--plan-fixes`");
+  });
+
+  test("Key Rule 7 reverted to three AskUserQuestion locations in codebase-audit", () => {
+    // v1.9.0 moved depth consent and plan menu to /plan-fixes, so codebase-audit's
+    // own AskUserQuestion surface is back to the pre-v1.8.0 three locations.
+    expect(skillMd).toContain("AskUserQuestion fires in three places");
+    // Explicitly note the moved locations
+    expect(skillMd).toMatch(/depth consent.*plan menu.*\/plan-fixes/s);
+  });
+
+  test("Key Rule 2 enforces output discipline (grep mode, dump traps, targeted reads, probe exit-0)", () => {
+    // Key Rule 2 was promoted from position 14 in v1.9.0 to make output discipline
+    // prominent during Phase 3 checklist execution. Four sub-rules (2a-2d) cover
+    // grep content-mode ban, bash dump traps, targeted Read ranges, and probe
+    // commands that must exit 0 so parallel tool batches don't cascade-cancel.
+    expect(skillMd).toContain("**2a.");
+    expect(skillMd).toContain("**2b.");
+    expect(skillMd).toContain("**2c.");
+    expect(skillMd).toContain("**2d.");
+    // 2a: grep content mode ban with the "Found N lines" vs "Found N files" tell —
+    // this is the crucial signal that reveals which mode the caller is actually in.
+    expect(skillMd).toContain("files_with_matches");
+    expect(skillMd).toContain('"Found N lines"');
+    expect(skillMd).toContain('"Found N files"');
+    // 2b: concrete dump traps named with counter-forms
+    expect(skillMd).toContain("pip-audit");
+    expect(skillMd).toContain("wc -l");
+    // 2c: targeted reads rule of thumb
+    expect(skillMd).toMatch(/~30 lines/);
+    // 2d: probe commands exit 0, cascade-cancel hazard named, canonical for-loop pattern
+    expect(skillMd).toContain("cascade-cancel");
+    expect(skillMd).toContain("[ -e");
+    expect(skillMd).toMatch(/for f in[\s\S]+?\[ -e "\$f" \] && echo "\$f"/);
+  });
+
+  test("Phase 1.7 dependency check uses jq to filter vulnerabilities", () => {
+    // v1.9.0 replaced the raw `--format json` dumps with jq-piped forms so a clean
+    // audit emits one line ("No dependency vulnerabilities.") instead of dumping
+    // the whole dep list. Covers pip-audit, npm audit, and cargo audit at minimum.
+    expect(skillMd).toContain("pip-audit -f json");
+    expect(skillMd).toContain("jq");
+    expect(skillMd).toContain("No dependency vulnerabilities.");
+    // Fallback when jq is unavailable
+    expect(skillMd).toMatch(/jq.*not installed|fall back/i);
   });
 
   test("has voice directive", () => {
     expect(skillMd).toContain("## Voice");
   });
 
-  test("has preamble with SLUG computation", () => {
+  test("has preamble with SLUG via shared contract", () => {
     expect(skillMd).toContain("SLUG=");
     expect(skillMd).toContain("AUDIT_HOME=");
     expect(skillMd).toContain("CODEBASE_AUDIT_HOME");
+    // v1.9.0: slug derivation moved to lib/slug.sh shared script
+    expect(skillMd).toContain("lib/slug.sh");
   });
 });
 

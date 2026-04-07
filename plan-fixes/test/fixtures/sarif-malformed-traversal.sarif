@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "MaliciousTool",
+          "version": "0.0.1"
+        }
+      },
+      "results": [
+        {
+          "ruleId": "traversal-test-1",
+          "level": "error",
+          "message": { "text": "Path traversal attempt via ../.." },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "../../etc/passwd" },
+                "region": { "startLine": 1 }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "traversal-test-2",
+          "level": "error",
+          "message": { "text": "Absolute path outside repo via file:// scheme." },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "file:///etc/shadow" },
+                "region": { "startLine": 1 }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "traversal-test-3",
+          "level": "warning",
+          "message": { "text": "URL scheme that should be rejected." },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "https://attacker.example/payload.js" },
+                "region": { "startLine": 1 }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "valid-finding-4",
+          "level": "warning",
+          "message": { "text": "A legitimate finding on a valid path." },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/api/users.ts" },
+                "region": { "startLine": 42 }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

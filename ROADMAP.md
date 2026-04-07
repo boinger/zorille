@@ -117,7 +117,7 @@ Rough implementation priority based on user value and complexity:
 4. Focused modes (`--security-only` etc.) — low complexity, high value
 5. ~~SARIF output format (`--format sarif`) — industry standard for static analysis~~ **SHIPPED v1.4.0**
 6. ~~`--plus-infra` — infrastructure scanning~~ **SHIPPED v1.5.0** (auto-detect, `--no-infra` opt-out, 16 patterns)
-7. ~~`--plan-fixes` — depth-aware fix plan generation~~ **SHIPPED v1.8.0**
+7. ~~`--plan-fixes` — depth-aware fix plan generation~~ **SHIPPED v1.8.0**; extracted into sibling skill `/plan-fixes` in **v1.9.0** (flag preserved as alias). The sibling skill also added SARIF 2.1.0 input support so it works standalone against CodeQL, ESLint, Semgrep, Sonar, or any other SARIF emitter.
 8. ~~GitHub Action wrapper — turnkey CI integration~~ **SHIPPED v1.7.0**
 9. Schema backward compatibility policy documentation
 10. ~~`--baseline-only` / `--no-fail-first-run` — gentler CI onboarding~~ **SHIPPED v1.6.0**

@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.9.0] - 2026-04-07
+
+### Architecture
+
+- **`--plan-fixes` extracted into a sibling skill `/plan-fixes`.** The depth-aware grouping, investigation, and planning logic that shipped in v1.8.0 as Phase 4.7 sub-steps now lives in its own skill at `plan-fixes/` in this repo. The setup script installs both skills. **The `/codebase-audit --plan-fixes` flag is preserved as a thin alias** — it runs the audit, then invokes `/plan-fixes` against the resulting baseline. Backward compatible. No migration needed for existing users. See `plan-fixes/CHANGELOG.md` for the 0.1.0 release notes.
+- **New Phase 5.5: Baseline rewrite.** When `--quick-fix` runs, Phase 5.5 rewrites the baseline with `quick_fix_status` per finding (`"applied"`, `"skipped"`, or unset) after fixes are applied. This is the correctness fix that makes `--plan-fixes --quick-fix` composable via the alias dispatch — `/plan-fixes` now reads an accurate post-application baseline and annotates already-applied groups via its Option D coordination.
+- **`lib/slug.sh` shared contract.** Slug derivation (`git remote get-url origin` → `owner-repo`) moved from inline `SKILL.md` logic into a shared shell script at the repo root. Both `/codebase-audit` and `/plan-fixes` invoke it, enforced by `test/slug-contract.test.ts`. This prevents slug drift between the two skills — a load-bearing contract because `/plan-fixes`'s baseline auto-discovery depends on computing the same slug as the audit that wrote the baseline.
+
+### New: `/plan-fixes` sibling skill (v0.1.0)
+
+- Standalone planner that consumes `/codebase-audit` baseline.json *or* any SARIF 2.1.0 source (CodeQL, ESLint, Semgrep, Sonar, GitHub Code Scanning, etc.).
+- Option D quick-fix coordination: three plan template variants (`plan-standard.md`, `plan-mixed.md`, `plan-applied.md`) annotate groups based on `quick_fix_status` — plans are a canonical record, never a filtered subset.
+- Security hardening for SARIF input: 7-step path validation (URI scheme strip, URL decode, `..` rejection, absolute-path suffix matching, symlink guard) and LLM injection mitigation (500-char truncation, markdown escape, `<untrusted-input>` tag wrapping).
+- Flags: `--from`, `--baseline`, `--sarif`, `--thorough`, `--show-applied`, `--verbose`.
+- Compression stat at Phase 7: "Compressed M findings into N reviewable plans" — the magical moment for SARIF consumers.
+- See `plan-fixes/SKILL.md` and `plan-fixes/CHANGELOG.md` for full details.
+
+### Why
+
+Auditing and planning are conceptually independent operations. v1.8.0 wedged planning into Phase 4.7 of the audit pipeline as a conditional fork; v1.9.0 cleans that up by giving planning its own skill. The `baseline.json` schema becomes the documented contract between them. Future siblings (verifiers, auto-fixers) can land without recoupling. v1.9.0 is **non-BREAKING** because the `--plan-fixes` flag continues to work via the alias dispatch.
+
 ## [1.8.0] - 2026-04-06
 
 ### Features

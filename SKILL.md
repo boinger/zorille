@@ -1,6 +1,6 @@
 ---
 name: codebase-audit
-version: 1.8.0
+version: 1.9.0
 description: |
   Full codebase audit. Analyzes an entire project cold, no diff, no branch context,
   producing a structured report covering bugs, security issues, architectural problems,
@@ -34,12 +34,14 @@ to verify by running Y" is better than a confident wrong answer.
 ```bash
 _BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
 echo "BRANCH: $_BRANCH"
-SLUG=$(git remote get-url origin 2>/dev/null | sed 's/.*[:/]\([^/]*\/[^/]*\)\.git$/\1/' | tr '/' '-')
-[ -z "$SLUG" ] && SLUG=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null || basename "$(pwd)")
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+SLUG=$(bash "$REPO_ROOT/lib/slug.sh" 2>/dev/null || basename "$REPO_ROOT")
 echo "SLUG: $SLUG"
 AUDIT_HOME="${CODEBASE_AUDIT_HOME:-$HOME/.codebase-audits}"
 echo "AUDIT_HOME: $AUDIT_HOME"
 ```
+
+The `lib/slug.sh` script is a load-bearing contract shared with `/plan-fixes`. Both skills must compute the same slug for the same repo. Do not inline the slug derivation here — always invoke the shared script so drift is impossible. If you're running this skill from a context where `lib/slug.sh` is unreachable (e.g., tests in a fixture repo), the fallback is the repo basename.
 
 # /codebase-audit — Cold-Start Codebase Audit
 
@@ -90,15 +92,14 @@ Detect the mode from arguments:
   - `--suggest-fixes` / `--quick-fix`: IGNORED
   - `--format json`: Default (implicit). Explicit `--format json` is accepted but no-op.
 - **Infrastructure Scanning** (automatic): When infrastructure files are detected in Phase 1.2 (Dockerfiles, K8s manifests, Terraform, GitHub Actions, docker-compose, nginx configs), infrastructure patterns are loaded and scanned automatically as an 8th category. Use `--no-infra` to opt out. Infrastructure findings compete on severity with application findings for the 50-finding cap.
-- **Plan Fixes** (`--plan-fixes`): Transforms audit findings into grouped, review-ready fix plan files with an LLM-native depth dial. Mechanical findings get grouped plans. Substantive findings get deeper investigation (callers, tests, adjacent code) after consent. Plans are written to `$AUDIT_HOME/$SLUG/plans/` and a menu lets the user select which to act on. Compatible with `/autoplan`, manual review, or standalone use. Mode compatibility:
+- **Plan Fixes** (`--plan-fixes [--thorough]`): Convenience alias. Runs the full audit to produce a baseline, then immediately invokes the sibling skill `/plan-fixes` against that baseline. The depth-aware grouping, investigation, and plan-file generation all live in `/plan-fixes`; this flag is a one-command shortcut that preserves the v1.8.0 UX. The `--thorough` flag (when combined with `--plan-fixes`) is forwarded to `/plan-fixes --thorough` so substantive findings are auto-investigated without a consent prompt. See `plan-fixes/SKILL.md` for the full behavior. Mode compatibility:
   - Full: YES (default use case)
   - Regression: YES
   - Changed-only: YES (plans scoped to changed files)
-  - Quick: IGNORED (quick mode has insufficient context for plans)
-  - CI/JSON/SARIF: IGNORED (structured output, not plans)
-  - Suggest-fixes: YES (diffs included in mechanical group plans)
-  - Quick-fix: YES (plans generated first, then mechanical fixes applied and marked `[AUTO-APPLIED]`)
-  - `--thorough`: auto-dive on all substantive findings without consent prompt
+  - Quick: IGNORED (alias dispatch suppressed — quick mode has insufficient context)
+  - CI/JSON/SARIF: IGNORED (alias dispatch suppressed — structured output, not interactive plans)
+  - Suggest-fixes: YES
+  - Quick-fix: YES (the alias dispatches AFTER Phase 5 + Phase 5.5 rewrites the baseline with `quick_fix_status`, so `/plan-fixes` sees the post-application state and annotates already-applied groups per its Option D coordination)
 
 ## Arguments
 
@@ -120,8 +121,8 @@ Detect the mode from arguments:
 - `/codebase-audit --ci --format sarif` — CI mode with SARIF output
 - `/codebase-audit --ci --format sarif --changed-only` — scoped CI check with SARIF
 - `/codebase-audit --ci --baseline-only` — establish baseline, always passes (for CI onboarding)
-- `/codebase-audit --plan-fixes` — grouped fix plans with depth-aware investigation (asks consent before diving deep on substantive findings)
-- `/codebase-audit --plan-fixes --thorough` — auto-dive on all substantive findings without consent prompt
+- `/codebase-audit --plan-fixes` — run the audit, then dispatch to the sibling `/plan-fixes` skill (alias). Equivalent to running `/codebase-audit` followed by `/plan-fixes`.
+- `/codebase-audit --plan-fixes --thorough` — same alias, with `--thorough` forwarded to `/plan-fixes` so substantive findings are auto-investigated without a consent prompt.
 - `/codebase-audit --no-infra` — skip infrastructure scanning even if infra files are present
 
 ---
@@ -141,22 +142,28 @@ echo "Audit storage: $AUDIT_HOME/$SLUG/audits/"
 
 ### 1.2 Language and framework detection
 
-Scan for build files, configs, and entry points to detect the tech stack:
+Scan for build files, configs, and entry points to detect the tech stack. **Use the canonical probe pattern from Key Rule 2d** — `for` loop with `test -e`, not `ls` with a wall of paths. `ls` exits non-zero when any listed path is missing, which cascade-cancels sibling parallel tools in Claude Code and produces red "Cancelled" noise for the user.
 
 ```bash
-setopt +o nomatch 2>/dev/null || true
-ls -la package.json Cargo.toml go.mod pyproject.toml Gemfile build.gradle pom.xml Makefile CMakeLists.txt *.csproj *.sln composer.json mix.exs 2>/dev/null || true
+for f in package.json Cargo.toml go.mod pyproject.toml Gemfile build.gradle pom.xml Makefile CMakeLists.txt composer.json mix.exs; do
+  [ -e "$f" ] && echo "$f"
+done
+# Glob matches (may expand to nothing) handled separately via find to keep the loop simple:
+find . -maxdepth 1 \( -name '*.csproj' -o -name '*.sln' \) 2>/dev/null
 ```
 
-Also scan for infrastructure config files:
+Also scan for infrastructure config files with the same pattern:
 
 ```bash
-setopt +o nomatch 2>/dev/null || true
-ls -la Dockerfile docker-compose.yml docker-compose.yaml nginx.conf 2>/dev/null || true
-ls -la .github/workflows/*.yml .github/workflows/*.yaml 2>/dev/null || true
-find . -maxdepth 3 \( -name '*.tf' -o -name '*.tfvars' \) -not -path '*/node_modules/*' -not -path '*/vendor/*' -not -path '*/.git/*' 2>/dev/null | head -5 || true
-find . -maxdepth 3 \( -path '*/k8s/*.yaml' -o -path '*/k8s/*.yml' -o -path '*/deploy/*.yaml' -o -path '*/deploy/*.yml' -o -name 'Chart.yaml' \) -not -path '*/node_modules/*' -not -path '*/vendor/*' -not -path '*/.git/*' 2>/dev/null | head -5 || true
+for f in Dockerfile docker-compose.yml docker-compose.yaml nginx.conf; do
+  [ -e "$f" ] && echo "$f"
+done
+find .github/workflows -maxdepth 1 \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null
+find . -maxdepth 3 \( -name '*.tf' -o -name '*.tfvars' \) -not -path '*/node_modules/*' -not -path '*/vendor/*' -not -path '*/.git/*' 2>/dev/null | head -5
+find . -maxdepth 3 \( -path '*/k8s/*.yaml' -o -path '*/k8s/*.yml' -o -path '*/deploy/*.yaml' -o -path '*/deploy/*.yml' -o -name 'Chart.yaml' \) -not -path '*/node_modules/*' -not -path '*/vendor/*' -not -path '*/.git/*' 2>/dev/null | head -5
 ```
+
+`find` already exits 0 when nothing matches, so no `|| true` tail is needed on those. The `for` loops emit only files that actually exist — no noise, no cascade-cancel risk.
 
 If any infrastructure files are found, note "Infrastructure files detected" for use in Phase 3.1 (auto-loading the infra checklist). This detection is informational — the `--no-infra` flag controls whether infra patterns actually run.
 
@@ -210,15 +217,23 @@ Skip this step if the repo is not a git repo or is a shallow clone.
 
 ### 1.7 Dependency vulnerability check
 
-Detect the package manager and run the appropriate audit command if available:
+Detect the package manager and run the appropriate audit command if available. **Pipe through `jq` (or equivalent) to extract only vulnerable entries** — never dump the full dependency JSON to the terminal. A clean audit with 100+ deps should produce a single line of output, not 1000+ lines of zero-vuln entries.
 
-- **npm/yarn**: `npm audit --json 2>/dev/null`
-- **Ruby**: `bundle audit --format json 2>/dev/null`
-- **Python**: `pip-audit --format json 2>/dev/null`
-- **Rust**: `cargo audit --json 2>/dev/null`
-- **Go**: `govulncheck ./... 2>/dev/null`
+- **Python** (pip-audit + jq):
+  ```bash
+  pip-audit -f json 2>/dev/null | jq -r '.dependencies | map(select(.vulns | length > 0)) | if length == 0 then "No dependency vulnerabilities." else {count: length, vulns: .} end'
+  ```
+- **npm/yarn** (npm audit + jq):
+  ```bash
+  npm audit --json 2>/dev/null | jq -r 'if (.metadata.vulnerabilities.total // 0) == 0 then "No dependency vulnerabilities." else {total: .metadata.vulnerabilities.total, by_severity: .metadata.vulnerabilities} end'
+  ```
+- **Ruby**: `bundle audit --format json 2>/dev/null | jq -r 'if (.results | length) == 0 then "No dependency vulnerabilities." else .results end'`
+- **Rust**: `cargo audit --json 2>/dev/null | jq -r 'if (.vulnerabilities.count // 0) == 0 then "No dependency vulnerabilities." else .vulnerabilities end'`
+- **Go**: `govulncheck -json ./... 2>/dev/null | jq -r 'select(.finding) | .finding' | head -50`
 
 If the audit tool is not installed or the command fails, skip gracefully and note "dependency audit tool not available" in the report.
+
+**If `jq` is not installed**, fall back to: run the audit command with stdout redirected to `/tmp/audit-$SLUG.json`, then use Read against that file to inspect it. Never dump raw audit JSON to the conversation.
 
 ### 1.8 Size-based strategy decision
 
@@ -542,149 +557,59 @@ Otherwise, print a summary directly to the conversation. This is what the user s
     - If this is a full audit (not `--changed-only`), on a non-default branch, with >20 findings: "Use `--changed-only` to audit only files changed on this branch."
     - If `--no-infra` was used but infrastructure files were detected: "Infrastructure files detected but scanning was disabled via `--no-infra`."
     - If `--ci` is active and no previous baseline exists and `--baseline-only` is NOT active: "First CI run on this codebase. Use `--baseline-only` to establish a baseline without failing, then `--fail-on-new` for ongoing runs."
-    - If audit found substantive findings and `--plan-fixes` was not used: "Use `--plan-fixes` for grouped fix plans with depth investigation, or `--plan-fixes --thorough` for maximum analysis."
+    - If audit found substantive findings and `--plan-fixes` was not used: "Found {N} substantive findings. Run `/plan-fixes` to generate grouped, PR-sized fix plans with depth-aware investigation (callers, tests, context). The baseline is already on disk — no re-audit needed."
+    - If `--plan-fixes` was used (via alias): "Tip: `/plan-fixes` also reads SARIF 2.1.0 from any source (CodeQL, ESLint, Semgrep, Sonar, GitHub Code Scanning). Try `/plan-fixes --from results.sarif`."
     - If no tips are applicable, omit the Tips block entirely.
 
 ### 4.7 Write the Fix Plan
 
 Skip this phase if `--ci` is active (no plan file). In `--json` mode without `--ci`, also skip the plan file. AskUserQuestion is never called in `--ci` or `--json` mode.
 
-**If `--plan-fixes` is active, follow sub-steps 4.7.1 through 4.7.7 instead of the default flat plan output below.** Otherwise, proceed with the default behavior.
+**Alias dispatch to `/plan-fixes`:** If `--plan-fixes` is active AND the mode is not `--ci`/`--json`/`--quick` (all of which suppress the alias):
 
-#### 4.7.1 Group findings (only when `--plan-fixes` is active)
+1. **Ordering depends on `--quick-fix`:**
+   - If `--quick-fix` is NOT active: dispatch immediately after Phase 4.6 (conversation summary).
+   - If `--quick-fix` IS also active: defer the dispatch until AFTER Phase 5 applies fixes AND Phase 5.5 rewrites the baseline with `quick_fix_status`. The alias dispatch runs at the end of Phase 5.5.
 
-Cluster findings into PR-sized groups using this heuristic:
+2. **Existence check:** Before dispatching, verify that `~/.claude/skills/plan-fixes` exists (directory or symlink). If not, emit this exact error and stop (do NOT fall through to the default flat plan output — the user explicitly asked for `--plan-fixes`):
 
-1. **Same file** → same group
-2. **Same checklist pattern + same top-level directory** (first path component, e.g., `src/`, `config/`) → same group
-3. **Monorepo degeneracy guard**: If the first path component contains >60% of findings (common in monorepos where everything is under `src/`), use the second path component instead
-4. **Max 8 findings per group, max 5 files per group**. Overflow creates additional groups labeled "Part N of M for {scope}" (e.g., "Part 2 of 3 for src/auth.ts")
-5. **Orphan findings** (no grouping affinity) get their own single-finding plan file. No minimum group size.
+   ```
+   Audit completed successfully. Baseline written to: <baseline-path>
 
-Number groups sequentially (1, 2, 3...). This number will be used for both the filename and the menu. "Part X of Y" splits take consecutive numbers (e.g., group 3 part 1 = plan #3, part 2 = plan #4).
+   However, --plan-fixes requires the /plan-fixes sibling skill, which is not installed.
+   To install both skills (including /plan-fixes), run the repo's setup script:
+     cd <repo-root> && ./setup
 
-#### 4.7.2 Classify group depth (only when `--plan-fixes` is active)
+   After installing, run:
+     /plan-fixes --from <baseline-path>
+   ```
 
-For each group:
-- **All-mechanical group**: shallow plan (no extra investigation needed)
-- **Contains ≥1 substantive finding**: flag for depth investigation
+3. **Dispatch directive:** Emit a one-line banner, then invoke `/plan-fixes`:
 
-#### 4.7.3 Depth consent (only when `--plan-fixes` is active, skip if `--thorough`)
+   ```
+   Dispatching to /plan-fixes against <baseline-path>...
+   ```
 
-If any groups are flagged for depth investigation, use AskUserQuestion:
+   Invocation: `/plan-fixes --from <baseline-path>` — and if `--thorough` was on the original `/codebase-audit` invocation, append `--thorough` to the sub-invocation. The baseline path is the one written by Phase 4.4 (or rewritten by Phase 5.5 when `--quick-fix` is active).
 
-> "N groups contain substantive findings that benefit from deeper investigation (reading callers, tests, and adjacent code). This costs approximately 2-3 extra Read calls per finding, up to 10 findings. Proceed?"
+4. **Forwarding rule:** `--thorough` is the only argument forwarded. Any other flags on the original invocation (`--quick-fix`, `--suggest-fixes`, `--min-severity`, etc.) are NOT forwarded — they applied to the audit, not to planning.
 
-Options:
-- **A) Yes, investigate deeper** — proceed to 4.7.4
-- **B) No, generate shallow plans** — skip 4.7.4, all groups get shallow plans
+5. **Sub-invocation failure:** If `/plan-fixes` fails during Phase 1-7, emit this exact error and return control to the user:
 
-If `--thorough` is active, skip this consent and proceed directly to 4.7.4.
+   ```
+   Audit completed successfully. Baseline written to: <baseline-path>
 
-#### 4.7.4 Depth investigation (only when `--plan-fixes` is active, consent granted or `--thorough`)
+   Planning failed: <error from /plan-fixes>
 
-Select substantive findings for investigation: highest severity first, then order of occurrence. **Cap at 10 findings per session.** Un-investigated substantive findings in an otherwise-investigated group get shallow entries in that group's plan, with a note: "Investigation deferred due to session cap."
+   The baseline is preserved on disk. To retry planning:
+     /plan-fixes --from <baseline-path> [--thorough if originally passed]
+   ```
 
-For each selected finding:
+   The audit's success is NOT rolled back. The baseline remains available for manual re-invocation.
 
-**Find callers:**
-1. Prefer the fully-qualified name (`ClassName.method` or `module.function`) when available
-2. If only a bare name is available and it is <6 characters OR a language keyword (function, class, def, return, import, etc.), **skip caller analysis** and note: "Skipped caller analysis: function name too common."
-3. Otherwise, Grep in `files_with_matches` mode for the name
-4. Read the top 3 callers by file proximity to the finding (same directory first, then parent directory, then sibling directories)
-5. Note in the plan: "Caller analysis is grep-based and may be incomplete — dynamic dispatch, reflection, and inheritance are not traced."
+6. **When alias dispatch is active, skip the default flat plan output below.** The plan files come from `/plan-fixes`.
 
-**Check tests** using this prioritized pattern list:
-1. Co-located `.test.` or `.spec.` suffix (e.g., `foo.test.ts` for `foo.ts`)
-2. Co-located `test_` prefix (e.g., `test_foo.py` for `foo.py`)
-3. Parallel `__tests__/` directory mirroring source structure
-4. Parallel `tests/` directory mirroring source structure
-5. Java-style `src/test/` mirror of `src/main/`
-
-If found, Read the relevant sections and note coverage gaps. If no test file found, note: "No test file found for this source file."
-
-**Examine context:**
-1. Attempt to read the entire containing function. Detect boundaries using bracket matching (C-family) or indentation level (Python).
-2. Fallback: read 50 lines centered on the finding (25 above, 25 below) if function boundaries cannot be determined.
-
-**Synthesize** investigation results into finding-specific notes. The group's plan file will have one `### Finding N: {title}` sub-section per investigated finding in the Approach section.
-
-#### 4.7.5 Generate plan files (only when `--plan-fixes` is active)
-
-Write one markdown plan per group to `$AUDIT_HOME/$SLUG/plans/{datetime}-{N}-{slugified-title}.md`. Use format `YYYY-MM-DD-HHMMSS` for `{datetime}`. Slugify the title (lowercase, spaces→hyphens, strip special chars).
-
-**Maintain a running file-set tracker** across plan generation: record every file mentioned in "Files to Modify" for each plan. When generating Plan B, check if any of its files appear in previous plans' file sets. If so, list those plans under Dependencies.
-
-**Plan template:**
-
-```markdown
-# Fix Plan: {group title}
-
-## Context
-{Why this group exists — the finding(s) and their impact}
-
-## Findings
-| # | Severity | Title | File | Line |
-|---|----------|-------|------|------|
-{table of findings in this group}
-
-## Approach
-
-{For shallow plans (all mechanical or investigation not done):}
-{Single narrative or per-finding one-line approach}
-
-{For deep plans (investigated findings):}
-### Finding 1: {title}
-{Investigation notes: callers, tests, context, recommended fix}
-
-### Finding 2: {title}
-{...}
-
-{For un-investigated findings in a partially-investigated group:}
-### Finding N: {title}
-{One-line approach. Note: "Investigation deferred due to session cap."}
-
-## Files to Modify
-- {file}: {what changes}
-
-## Risk
-**{Low|Medium|High}** — {rubric-based justification}
-
-Rubric:
-- **High**: 3+ callers affected OR test coverage gap for the affected path OR multi-file change
-- **Medium**: single file with tests present but finding is non-trivial
-- **Low**: isolated change with clear, passing tests
-
-## Verify & Rollback
-- Run: {test command}
-- Check: {grep pattern or manual verification}
-- Rollback: `git revert <commit-hash>` after applying, or revert specific file changes
-
-## Dependencies
-{Other fix plans (by number) that touch files this plan modifies, e.g., "Plan #3 also modifies src/auth.ts"}
-{If none: "None detected."}
-```
-
-#### 4.7.6 Present plan menu (only when `--plan-fixes` is active)
-
-List all generated plans in the conversation with: number, title, finding count, severity distribution, depth level (shallow/deep).
-
-Use AskUserQuestion:
-
-> "Generated N fix plans. Which would you like to act on?"
-
-Options:
-- **A) Act on all** — proceed to plan execution for all plans
-- **B) Select by number** — user replies with comma-separated numbers (e.g., "1,3,5") as a text answer
-- **C) Skip** — plans are written to disk but user will act on them later
-
-For option B, after the user provides numbers, proceed with only the selected plans. If they reply with invalid numbers, note the invalid ones and proceed with the valid selections.
-
-#### 4.7.7 Post-Phase-5 AUTO-APPLIED marking (only when `--plan-fixes --quick-fix` is active)
-
-After Phase 5 applies mechanical fixes, re-read the plan files for groups whose findings were auto-applied. Prepend `[AUTO-APPLIED]` to the plan title in each affected file. This makes plan files a complete record of what was found AND what was done.
-
-**End of `--plan-fixes` sub-steps.** When `--plan-fixes` is NOT active, continue with the default flat plan output below.
+If `--plan-fixes` is NOT active, proceed with the default flat plan output below.
 
 After printing the conversation summary, write the fix plan to the plan file. The audit is planning-for-a-plan — the plan file is the natural, actionable output.
 
@@ -1024,13 +949,39 @@ If at least one fix was applied and this is a git repo:
 
 If this is not a git repo, skip this step entirely — just print the applied/skipped summary.
 
-### 5.5 Final summary
+### 5.5 Rewrite baseline with quick_fix_status
+
+This step exists so that `/plan-fixes` (when invoked via the `--plan-fixes` alias) sees a baseline that accurately reflects which findings were auto-applied in Phase 5. Without this step, a baseline-mediated alias dispatch would give `/plan-fixes` stale data and its Option D annotation (`[ALREADY APPLIED]` markers) would miss everything.
+
+**Behavior:**
+1. Re-load the baseline file written in Phase 4.4 at `$AUDIT_HOME/$SLUG/audits/{datetime}-baseline.json`.
+2. For each finding in the baseline's `findings[]` array, set `quick_fix_status`:
+   - `"applied"` if the finding's fix was successfully applied by Phase 5
+   - `"skipped"` if the fix was attempted but failed (Phase 5 skipped it and continued)
+   - Leave the field unset otherwise (the finding wasn't a quick-fix candidate)
+3. Also update `quick_fix_applied: true` at the top level (it was `false` when written in Phase 4.4).
+4. Rewrite the baseline file to disk atomically (write to a temp file, then rename).
+5. Emit a one-line log to stderr: `"Baseline rewritten with quick_fix_status ({N} applied, {M} skipped)."`.
+
+**Failure mode:** If the rewrite fails (disk full, permission denied, interrupted mid-write), Phase 5's applied-fix state is already persisted to the working tree — the fixes ARE on disk, git reflects them. Phase 5.5 failure only affects the baseline's `quick_fix_status` field, not the actual code changes. Emit a warning:
+
+```
+Warning: baseline rewrite failed (<reason>). Plan files may not reflect already-applied fixes. Baseline at <path> still reflects pre-Phase-5 state.
+```
+
+If the `--plan-fixes` alias is active, the dispatch still proceeds with the original baseline, and the resulting plans will show those findings as `pending` instead of `applied` — the plans are still correct, just less annotated. The user can manually re-run `/plan-fixes --from <baseline>` after fixing the disk issue. Phase 5's success is NOT rolled back.
+
+**Skip Phase 5.5 entirely if Phase 5 was skipped** (no `--quick-fix`).
+
+### 5.6 Final summary
 
 Print:
 - "Quick-fix complete. N fixes applied, M skipped."
 - "Recommend running your test suite to verify: `{detected test command}`" — detect the test command from `package.json` scripts, `Makefile`, or equivalent.
 - If remaining plan items exist (Part 1b or Part 2): "The fix plan still contains K items requiring manual review."
 - Report location reminder.
+
+**After Phase 5.6 completes, if the `--plan-fixes` alias is active:** execute the alias dispatch from Phase 4.7 now. This is the `--quick-fix + --plan-fixes` ordering path — the baseline has been rewritten in 5.5, the summary has been printed in 5.6, and the user is ready to see their fix plans.
 
 ---
 
@@ -1066,14 +1017,12 @@ Print:
 - **`--baseline-only` with `--fail-on-new`**: ERROR — mutually exclusive. Use `--baseline-only` for the first run, then `--fail-on-new` for subsequent runs.
 - **`--baseline-only` with `--fail-on-regression`**: ERROR — mutually exclusive. `--baseline-only` always passes, so regression gating contradicts its purpose.
 - **`--baseline-only` re-run**: Overwrites the previous baseline. Idempotent and safe to re-run.
-- **`--plan-fixes` with `--ci`/`--json`**: IGNORED. CI mode emits structured output, not plans.
-- **`--plan-fixes` with `--quick`**: IGNORED. Quick mode has insufficient context for meaningful plan generation.
-- **`--plan-fixes --thorough`**: Auto-dive on all substantive findings without consent prompt. Still capped at 10 findings per session.
-- **`--plan-fixes --quick-fix`**: Generate plans first (including mechanical groups), then Phase 5 applies mechanical fixes and marks affected plan files `[AUTO-APPLIED]` in Phase 4.7.7.
-- **`--plan-fixes` with single file containing 15+ findings**: Split into groups labeled "Part N of M for {file}". Consecutive plan numbers.
-- **`--plan-fixes` with 0 substantive findings**: All groups get shallow plans. No consent prompt (nothing to consent to).
-- **`--plan-fixes` with 25+ substantive findings**: Investigate top 10 by severity. Remaining substantive findings get shallow entries with note: "Investigation deferred due to session cap."
-- **`--plan-fixes` with monorepo `src/` degeneracy**: If first path component contains >60% of findings, use second path component for grouping instead.
+- **`--plan-fixes` with `--ci`/`--json`/`--format sarif`**: Alias dispatch is suppressed. CI/JSON/SARIF modes emit structured output, not interactive plans. Audit runs normally.
+- **`--plan-fixes` with `--quick`**: Alias dispatch is suppressed. Quick mode has insufficient context for meaningful plan generation. Emit info line: "`--plan-fixes` ignored in `--quick` mode (insufficient context for plan generation)."
+- **`--plan-fixes --thorough`**: `--thorough` is forwarded through the alias dispatch to `/plan-fixes --thorough`. Effect: `/plan-fixes` skips its Phase 4 depth consent and auto-investigates substantive findings.
+- **`--plan-fixes --quick-fix`**: The alias dispatch ordering defers to AFTER Phase 5 applies fixes AND Phase 5.5 rewrites the baseline with `quick_fix_status`. `/plan-fixes` then reads the post-application baseline and annotates already-applied groups via its Option D coordination (templates: `plan-applied.md`, `plan-mixed.md`, `plan-standard.md`). See Phase 4.7 and Phase 5.5 for the flow.
+- **`--plan-fixes` when `/plan-fixes` sibling skill is not installed**: Existence check in Phase 4.7 fails. Emit the canonical "Audit completed successfully... /plan-fixes requires..." error with manual recovery command. Do NOT fall through to the flat plan output — the user explicitly asked for plan-fixes.
+- **`--thorough` without `--plan-fixes`**: No-op. `--thorough` has no meaning outside the `/plan-fixes` dispatch path. Documented here as a no-op edge case; do not error, just ignore.
 - **`--format sarif` with `--suggest-fixes`/`--quick-fix`**: IGNORED. SARIF does not carry inline diffs.
 - **`--format sarif` standalone (no `--ci`)**: SARIF to stdout, no exit codes. Equivalent to `--json` but in SARIF format.
 - **`--format sarif` with `--min-severity`**: Filters both `results` and `rules` arrays. Only rules referenced by included results are declared.
@@ -1090,19 +1039,46 @@ Print:
 ## Key Rules
 
 1. During audit phases (1-3), you MUST NOT modify any source code. Phase 4 writes the report/baseline to `$AUDIT_HOME` and the fix plan to the plan file. Phase 5 (`--quick-fix` only) applies mechanical fixes to source code — this is the only phase that modifies project files. When the plan is executed (after "Ready to code?"), you may edit source code to implement the remaining fixes.
-2. Findings that reference specific code MUST include `file:line`. Findings about missing functionality (missing tests, missing error handling), dependency vulnerabilities, or architectural patterns should reference the most relevant file or component instead. Never report a finding you cannot anchor to something concrete in the codebase.
-3. Reports are saved to your home directory (`$AUDIT_HOME`), not the project directory. They may contain security findings — do not commit them to public repos.
-4. No hallucinating findings. Every finding must reference a specific file and line (or component for non-code findings). If you can't point to it, don't report it.
-5. Use the severity calibration definitions exactly as specified. Do not inflate or deflate severity.
-6. In quick mode, respect the 2-minute target. Do not run Phase 2 or the full Phase 3 checklist. `--changed-only` also skips Phase 2 and does not write a baseline.
-7. AskUserQuestion fires in five places: (1) Phase 1 if >50K LOC, to scope the audit; (2) Phase 4.7 after the plan is written, to offer the next step; (3) Phase 5 (`--quick-fix` only) for dirty working tree check and commit proposal; (4) Phase 4.7.3 depth consent (`--plan-fixes` only, unless `--thorough`); (5) Phase 4.7.6 plan menu (`--plan-fixes` only). In `--ci` or `--json` mode, AskUserQuestion is NEVER called — all decisions are made automatically. Do not use AskUserQuestion elsewhere during the audit.
-8. All bash blocks are self-contained. Do not rely on shell variables persisting between code blocks.
-9. When reading files for context, read enough surrounding lines to understand the code — do not make judgments from a single line in isolation.
-10. Cap detailed findings at 50. Summarize overflow in a table.
-11. Be aware of your knowledge cutoff. Do not flag dependency versions, language versions, or API usage as "deprecated" or "nonexistent" based solely on your training data. If uncertain whether a version exists, state the uncertainty rather than asserting it as a finding.
-12. Always use the Read tool to read files — never use `cat` via Bash. The Read tool provides better context and is the expected convention.
-13. The audit is planning-for-a-plan. Phases 1-3 are read-only research. Phase 4 produces two outputs: the archival report (written to `$AUDIT_HOME` via Bash) and the fix plan (written to the plan file). The plan file is the correct, actionable output — "Ready to code?" means "execute this fix plan." When `--quick-fix` is active, findings auto-applied by Phase 5 are marked `[AUTO-APPLYING]` in the plan — only substantive and review-suggested items remain actionable.
-14. **NEVER use Grep in `content` mode during checklist execution.** Always use `files_with_matches` mode. If a regex returns more than ~20 lines, the pattern is too broad — use `files_with_matches` to get filenames, then Read specific line ranges. Multiline regex patterns (e.g., patterns matching across `{` `}` boundaries) are especially dangerous and must NEVER be run in content mode.
+
+2. **Output discipline — the user sees every Bash/Grep/Read output.** This is the single highest-leverage rule for audit UX. Violating it turns a focused investigation into an unreadable scroll. Three hard sub-rules:
+
+   **2a. NEVER use Grep in `content` mode during checklist execution.** Always use `files_with_matches` mode. If the Grep result says `"Found N lines"` (vs `"Found N files"`), you're in content mode and you just dumped file:line:text for every match. Switch to `files_with_matches` to get filenames only, then Read specific line ranges. Multiline regex patterns (patterns matching across `{` `}` boundaries) are especially dangerous and must NEVER be run in content mode — they return enormous context blocks.
+
+   **2b. NEVER dump raw command output when a count or summary suffices.** Common traps:
+   - `find src -name '*.py'` → pipe through `| wc -l` for a count, then use Glob to target specific paths when needed.
+   - `pip-audit --format json` → pipe through `jq` to extract only vulnerabilities (see Phase 1.7 for the exact forms for each package manager). Never `| head -N` a raw audit JSON — the first N lines are almost always clean deps and the vulns are buried lower.
+   - `git log --format=%B` → cap with `-10` or `-20`. Don't dump full history.
+   - `ls -la <large dir>` → pipe through `| head -20` or `| wc -l` for a count.
+
+   **2c. When reading files, read targeted line ranges, not whole files.** Pick 20–50 lines around the finding, not the whole function body unless the function is short. If you need more context after the first Read, do a second targeted Read — that's cheaper than one giant Read that dumps hundreds of lines. Unread code also isn't useful to the user — they can look at the file themselves.
+
+   **2d. Every probe command MUST exit 0 — even when the target doesn't exist.** This matters because Claude Code batches Bash calls in parallel, and a single non-zero exit in the batch cascade-cancels its sibling tools. The user sees red "Cancelled" messages for work that had nothing wrong with it. The trap is `ls` — `ls /nonexistent 2>/dev/null` still exits 1 even though stderr is suppressed. Common fixes:
+   - **Probing sentinel files** (does `Dockerfile` / `pyproject.toml` / `.github/workflows` exist?): use a `for` loop with `test -e`, never a multi-path `ls`:
+     ```bash
+     for f in pyproject.toml Makefile Dockerfile .github/workflows; do
+       [ -e "$f" ] && echo "$f"
+     done
+     ```
+     Clean output (only existing files), always exits 0, no `|| true` gymnastics.
+   - **If you really need `ls`**, append `|| true`: `ls -la foo.txt 2>/dev/null || true`. But the `for` pattern is strictly better for existence probing.
+   - **`find`** already exits 0 when nothing matches — use `find` in preference to `ls` when enumerating.
+   - **`grep`** exits 1 when nothing matches — append `|| true` when using grep in a pipeline whose failure would cascade.
+   - **`git` commands against missing refs/remotes/files** — append `|| true` or wrap in `if git rev-parse ... >/dev/null 2>&1; then ...`.
+
+   Rule of thumb: if a single tool call would emit more than ~30 lines of output, restructure the call (count, filter, grep-to-files, jq-extract) unless those lines are genuinely all load-bearing signal.
+
+3. Findings that reference specific code MUST include `file:line`. Findings about missing functionality (missing tests, missing error handling), dependency vulnerabilities, or architectural patterns should reference the most relevant file or component instead. Never report a finding you cannot anchor to something concrete in the codebase.
+4. Reports are saved to your home directory (`$AUDIT_HOME`), not the project directory. They may contain security findings — do not commit them to public repos.
+5. No hallucinating findings. Every finding must reference a specific file and line (or component for non-code findings). If you can't point to it, don't report it.
+6. Use the severity calibration definitions exactly as specified. Do not inflate or deflate severity.
+7. In quick mode, respect the 2-minute target. Do not run Phase 2 or the full Phase 3 checklist. `--changed-only` also skips Phase 2 and does not write a baseline.
+8. AskUserQuestion fires in three places in `/codebase-audit`: (1) Phase 1 if >50K LOC, to scope the audit; (2) Phase 4.7 after the flat plan is written (when `--plan-fixes` is NOT active), to offer the next step; (3) Phase 5 (`--quick-fix` only) for dirty working tree check and commit proposal. In `--ci` or `--json` mode, AskUserQuestion is NEVER called — all decisions are made automatically. Do not use AskUserQuestion elsewhere during the audit. The depth consent and plan menu AskUserQuestion calls that existed in v1.8.0's Phase 4.7.3/4.7.6 now live in the `/plan-fixes` sibling skill, not here.
+9. All bash blocks are self-contained. Do not rely on shell variables persisting between code blocks.
+10. When reading files for context, read enough surrounding lines to understand the code — do not make judgments from a single line in isolation. (This is not in tension with Rule 2c — "enough" is 20-50 lines around a finding, not 200.)
+11. Cap detailed findings at 50. Summarize overflow in a table.
+12. Be aware of your knowledge cutoff. Do not flag dependency versions, language versions, or API usage as "deprecated" or "nonexistent" based solely on your training data. If uncertain whether a version exists, state the uncertainty rather than asserting it as a finding.
+13. Always use the Read tool to read files — never use `cat` via Bash. The Read tool provides better context and is the expected convention.
+14. The audit is planning-for-a-plan. Phases 1-3 are read-only research. Phase 4 produces two outputs: the archival report (written to `$AUDIT_HOME` via Bash) and the fix plan (written to the plan file). The plan file is the correct, actionable output — "Ready to code?" means "execute this fix plan." When `--quick-fix` is active, findings auto-applied by Phase 5 are marked `[AUTO-APPLYING]` in the plan — only substantive and review-suggested items remain actionable.
 15. When `--suggest-fixes` is active, generate diffs during Phase 3 immediately after confirming each finding — not batched at the end of Phase 3, not retroactively in Phase 4. The code context from the Read that confirmed the finding is essential for accurate diffs. Each diff must be a minimal, conservative change. Never suggest refactoring beyond the specific finding. If a finding cannot be fixed with a short diff, mark it accordingly rather than forcing a bad suggestion. The unified diff format enables `--quick-fix` (Phase 5) to parse and apply diffs mechanically.
 16. `--quick-fix` implies `--suggest-fixes`. If the user passes `--quick-fix` without `--suggest-fixes`, activate suggest-fixes behavior automatically. Quick-fix requires diffs to apply.
 17. When `--format sarif` is active, rule IDs must be deterministic (`{category}/{kebab-title}`) and declared in `tool.driver.rules[]` before being referenced in `results[]`. File paths must be relative to the git root with forward slashes and no leading `./`. Use `%SRCROOT%` as the `uriBaseId`. `message.text` contains the title only; `rule.fullDescription.text` contains the recommendation.

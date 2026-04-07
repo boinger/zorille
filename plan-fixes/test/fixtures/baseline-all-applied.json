@@ -1,0 +1,52 @@
+{
+  "version": "1.0.0",
+  "datetime": "2026-04-07T12:00:00Z",
+  "commit_hash": "789aabb",
+  "mode": "full",
+  "slug": "fixture-all-applied",
+  "health_score": 95,
+  "quick_fix_applied": true,
+  "codebase": {
+    "loc": 5000,
+    "languages": ["TypeScript"],
+    "framework": "Next.js",
+    "test_files": 12,
+    "dependency_vulns": 0
+  },
+  "findings": [
+    {
+      "id": "p1",
+      "severity": "critical",
+      "category": "security",
+      "title": "SQL injection in user search",
+      "file": "src/api/users.ts",
+      "line": 42,
+      "quick_fix_status": "applied"
+    },
+    {
+      "id": "p2",
+      "severity": "important",
+      "category": "security",
+      "title": "Missing input validation on email field",
+      "file": "src/api/users.ts",
+      "line": 87,
+      "quick_fix_status": "applied"
+    },
+    {
+      "id": "p3",
+      "severity": "notable",
+      "category": "docs",
+      "title": "Missing JSDoc on public API",
+      "file": "src/public/index.ts",
+      "line": 1,
+      "quick_fix_status": "applied"
+    }
+  ],
+  "summary": {
+    "critical": 1,
+    "important": 1,
+    "notable": 1,
+    "opportunity": 0,
+    "total": 3
+  }
+}

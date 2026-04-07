@@ -342,47 +342,49 @@ describe("E2E: Infrastructure checklist", () => {
   });
 });
 
-describe("E2E: plan-fixes documentation completeness", () => {
+describe("E2E: --plan-fixes alias (v1.9.0 carve-out)", () => {
   const skillMd = fs.readFileSync(path.join(ROOT, "SKILL.md"), "utf-8");
 
-  test("plan template sections are documented", () => {
-    expect(skillMd).toContain("## Context");
-    expect(skillMd).toContain("## Findings");
-    expect(skillMd).toContain("## Approach");
-    expect(skillMd).toContain("## Files to Modify");
-    expect(skillMd).toContain("## Risk");
-    expect(skillMd).toContain("## Verify & Rollback");
-    expect(skillMd).toContain("## Dependencies");
+  test("--plan-fixes flag is documented as alias dispatcher", () => {
+    // The flag stays as a backward-compat alias for the sibling skill.
+    expect(skillMd).toContain("--plan-fixes");
+    expect(skillMd).toContain("alias");
+    expect(skillMd).toContain("sibling");
+    expect(skillMd).toContain("/plan-fixes");
   });
 
-  test("grouping heuristic is documented", () => {
-    expect(skillMd).toContain("Max 8 findings per group");
-    expect(skillMd).toContain("max 5 files per group");
-    expect(skillMd).toContain("Part N of M");
-    expect(skillMd).toContain("monorepo");
-    expect(skillMd).toContain("60% of findings");
+  test("alias dispatch invocation format is specified", () => {
+    // The dispatch must pass --from with the baseline path
+    expect(skillMd).toMatch(/\/plan-fixes.*--from.*baseline/s);
   });
 
-  test("depth consent mechanism is documented", () => {
-    expect(skillMd).toContain("benefit from deeper investigation");
-    expect(skillMd).toContain("up to 10 findings");
-    expect(skillMd).toContain("skip this consent");
+  test("--thorough flag is preserved and forwarded", () => {
+    expect(skillMd).toContain("--thorough");
+    // Forwarding rule must be explicit, not implicit
+    expect(skillMd).toMatch(/--thorough.*forward/is);
   });
 
-  test("plan output path is documented", () => {
-    expect(skillMd).toContain("$AUDIT_HOME/$SLUG/plans/");
+  test("alias dispatch respects --ci / --json / --quick suppression", () => {
+    // These modes should suppress the dispatch per the edge cases section.
+    expect(skillMd).toContain("`--plan-fixes` with `--ci`");
+    expect(skillMd).toContain("`--plan-fixes` with `--quick`");
   });
 
-  test("plan-fixes composes with quick-fix via AUTO-APPLIED", () => {
-    expect(skillMd).toContain("[AUTO-APPLIED]");
-    expect(skillMd).toContain("4.7.7");
+  test("Phase 5.5 baseline rewrite is the quick-fix coordination point", () => {
+    // v1.9.0 added Phase 5.5 to make --plan-fixes + --quick-fix composition correct.
+    expect(skillMd).toContain("5.5 Rewrite baseline");
+    expect(skillMd).toContain("quick_fix_status");
+    // Phase 5.5 must run BEFORE the alias dispatch when --quick-fix is active
+    expect(skillMd).toMatch(/Phase 5\.5.*--plan-fixes|--plan-fixes.*Phase 5\.5/s);
   });
 
-  test("caller grep guard is documented", () => {
-    expect(skillMd).toContain("Skipped caller analysis");
+  test("alias dispatch existence check for sibling skill", () => {
+    // If /plan-fixes isn't installed, the audit must give a clear recovery path
+    expect(skillMd).toContain("~/.claude/skills/plan-fixes");
+    expect(skillMd).toMatch(/setup/i);
   });
 
-  test("report template supports --plan-fixes", () => {
+  test("report template still references --plan-fixes as preserved mode", () => {
     const template = fs.readFileSync(
       path.join(ROOT, "report-template.md"),
       "utf-8",

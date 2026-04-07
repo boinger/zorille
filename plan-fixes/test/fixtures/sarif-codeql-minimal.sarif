@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "CodeQL",
+          "version": "2.15.0",
+          "informationUri": "https://codeql.github.com/"
+        }
+      },
+      "results": [
+        {
+          "ruleId": "js/sql-injection",
+          "level": "error",
+          "message": { "text": "This query is constructed from user input and could be vulnerable to SQL injection." },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/api/users.ts" },
+                "region": { "startLine": 42 }
+              }
+            }
+          ],
+          "properties": { "tags": ["security"] },
+          "fixes": [
+            {
+              "description": { "text": "Use a parameterized query." }
+            }
+          ]
+        },
+        {
+          "ruleId": "js/unused-variable",
+          "level": "warning",
+          "message": { "text": "The variable 'result' is unused." },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/lib/helpers.ts" },
+                "region": { "startLine": 87 }
+              }
+            }
+          ],
+          "properties": { "tags": ["quality"] }
+        },
+        {
+          "ruleId": "js/missing-docstring",
+          "level": "note",
+          "message": { "text": "Public function lacks a JSDoc comment." },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/public/index.ts" },
+                "region": { "startLine": 1 }
+              }
+            }
+          ],
+          "properties": { "tags": ["docs"] }
+        },
+        {
+          "ruleId": "js/cosmetic-issue",
+          "level": "none",
+          "message": { "text": "Trailing whitespace detected." },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/lib/util.ts" },
+                "region": { "startLine": 12 }
+              }
+            }
+          ],
+          "properties": { "tags": ["style"] }
+        }
+      ]
+    }
+  ]
+}

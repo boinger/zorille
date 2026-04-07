@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "NonStandardTool",
+          "version": "0.0.1"
+        }
+      },
+      "results": [
+        {
+          "ruleId": "nonstandard-level-1",
+          "level": "fatal",
+          "message": { "text": "This finding uses a non-standard SARIF level that should default to 'notable' with a log line." },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/lib/util.ts" },
+                "region": { "startLine": 1 }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "nonstandard-level-2",
+          "message": { "text": "This finding omits the level field entirely and should also default to 'notable'." },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/lib/util.ts" },
+                "region": { "startLine": 10 }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

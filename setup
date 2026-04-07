@@ -1,42 +1,73 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SKILL_DIR="$HOME/.claude/skills/codebase-audit"
 SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
+SKILLS=("codebase-audit" "plan-fixes")
 
-# Upgrade mode: if already installed and pointing here, just pull
-if [ -L "$SKILL_DIR" ] && [ "$(readlink "$SKILL_DIR")" = "$SOURCE_DIR" ]; then
+# If codebase-audit is already installed and pointing here, treat this as
+# an upgrade: git pull, then FALL THROUGH to the per-skill install loop.
+# Do NOT early-exit — that would skip installing the plan-fixes symlink
+# for existing v1.8.0 users upgrading to v1.9.0.
+if [ -L "$HOME/.claude/skills/codebase-audit" ] && \
+   [ "$(readlink "$HOME/.claude/skills/codebase-audit")" = "$SOURCE_DIR" ]; then
   echo "Already installed. Pulling latest..."
   git -C "$SOURCE_DIR" pull 2>/dev/null || true
-  echo "Updated to v$(cat "$SOURCE_DIR/VERSION")"
-  exit 0
+  echo "Pulled. Ensuring all skills are installed..."
 fi
 
-# Warn if symlink points to a different source
-if [ -L "$SKILL_DIR" ]; then
-  echo "WARNING: $SKILL_DIR currently points to $(readlink "$SKILL_DIR")"
-  echo "Replacing with $SOURCE_DIR"
-fi
+mkdir -p "$HOME/.claude/skills"
 
-# Safety: don't overwrite a real directory
-if [ -d "$SKILL_DIR" ] && [ ! -L "$SKILL_DIR" ]; then
-  echo "ERROR: $SKILL_DIR exists and is a real directory (not a symlink)."
-  echo "Remove it first if you want to install: rm -rf $SKILL_DIR"
-  exit 1
-fi
+for skill in "${SKILLS[@]}"; do
+  SKILL_DIR="$HOME/.claude/skills/$skill"
+  if [ "$skill" = "codebase-audit" ]; then
+    SOURCE_SKILL_DIR="$SOURCE_DIR"
+  else
+    SOURCE_SKILL_DIR="$SOURCE_DIR/$skill"
+  fi
 
-# Create parent dir if needed
-mkdir -p "$(dirname "$SKILL_DIR")"
+  # Warn if symlink points to a different source
+  if [ -L "$SKILL_DIR" ] && [ "$(readlink "$SKILL_DIR")" != "$SOURCE_SKILL_DIR" ]; then
+    echo "WARNING: $SKILL_DIR currently points to $(readlink "$SKILL_DIR")"
+    echo "Replacing with $SOURCE_SKILL_DIR"
+  fi
 
-# Create symlink
-ln -sf "$SOURCE_DIR" "$SKILL_DIR"
+  # Safety: don't overwrite a real directory
+  if [ -d "$SKILL_DIR" ] && [ ! -L "$SKILL_DIR" ]; then
+    echo "ERROR: $SKILL_DIR exists and is a real directory (not a symlink)."
+    echo "Remove it first if you want to install: rm -rf $SKILL_DIR"
+    exit 1
+  fi
 
-echo "Installed /codebase-audit v$(cat "$SOURCE_DIR/VERSION")"
-echo ""
-echo "Audit reports will be saved to ~/.codebase-audits/ on first run."
-echo "Set CODEBASE_AUDIT_HOME to change this location."
-echo ""
-echo "Usage:"
-echo "  /codebase-audit              Full audit"
-echo "  /codebase-audit --quick      2-minute smoke check"
-echo "  /codebase-audit --suggest-fixes  Audit with inline fix diffs"
+  # Safety: source directory must exist
+  if [ ! -d "$SOURCE_SKILL_DIR" ]; then
+    echo "ERROR: Source directory not found: $SOURCE_SKILL_DIR"
+    echo "Did you clone the repo fully? plan-fixes/ is a sibling skill in this repo."
+    exit 1
+  fi
+
+  ln -sf "$SOURCE_SKILL_DIR" "$SKILL_DIR"
+  echo "  ✓ /$skill → $SOURCE_SKILL_DIR"
+done
+
+CBA_VERSION=$(cat "$SOURCE_DIR/VERSION")
+PF_VERSION=$(cat "$SOURCE_DIR/plan-fixes/VERSION" 2>/dev/null || echo "?")
+
+cat <<BANNER
+
+Installed two related Claude Code skills:
+  /codebase-audit v${CBA_VERSION}  — finds issues (audit + baseline)
+  /plan-fixes     v${PF_VERSION}   — turns findings into fix plans
+
+Audit reports saved to ~/.codebase-audits/ on first run.
+Set CODEBASE_AUDIT_HOME to change this location.
+
+Usage:
+  /codebase-audit                           Full audit
+  /codebase-audit --quick-fix               Audit + auto-apply mechanical fixes
+  /codebase-audit --plan-fixes              Audit + dispatch to /plan-fixes (alias)
+  /plan-fixes                               Plan fixes from latest baseline
+  /plan-fixes --thorough                    Auto-dive on all substantive findings
+  /plan-fixes --show-applied                Expand already-applied plans in menu
+  /plan-fixes --from results.sarif          Plan fixes from any SARIF 2.1.0 source
+                                            (CodeQL, ESLint, Semgrep, Sonar, etc.)
+BANNER

@@ -1,0 +1,77 @@
+{
+  "version": "1.0.0",
+  "datetime": "2026-04-07T12:00:00Z",
+  "commit_hash": "aabbcc1",
+  "mode": "full",
+  "slug": "fixture-mixed-statuses",
+  "health_score": 70,
+  "quick_fix_applied": true,
+  "codebase": {
+    "loc": 5000,
+    "languages": ["TypeScript"],
+    "framework": "Next.js",
+    "test_files": 12,
+    "dependency_vulns": 0
+  },
+  "findings": [
+    {
+      "id": "s1",
+      "severity": "critical",
+      "category": "security",
+      "title": "SQL injection in user search",
+      "file": "src/api/users.ts",
+      "line": 42,
+      "quick_fix_status": "applied"
+    },
+    {
+      "id": "s2",
+      "severity": "important",
+      "category": "security",
+      "title": "Missing input validation on email field",
+      "file": "src/api/users.ts",
+      "line": 87,
+      "quick_fix_status": "applied"
+    },
+    {
+      "id": "s3",
+      "severity": "important",
+      "category": "error-handling",
+      "title": "Bare except clause swallows all errors",
+      "file": "src/api/auth.ts",
+      "line": 15,
+      "quick_fix_status": "skipped"
+    },
+    {
+      "id": "s4",
+      "severity": "notable",
+      "category": "error-handling",
+      "title": "Catch-all exception in request handler",
+      "file": "src/api/handlers.ts",
+      "line": 104,
+      "quick_fix_status": "skipped"
+    },
+    {
+      "id": "s5",
+      "severity": "notable",
+      "category": "tests",
+      "title": "Test file missing for critical module",
+      "file": "src/lib/crypto.ts",
+      "line": 1
+    },
+    {
+      "id": "s6",
+      "severity": "opportunity",
+      "category": "docs",
+      "title": "Missing JSDoc on public API",
+      "file": "src/public/index.ts",
+      "line": 1
+    }
+  ],
+  "summary": {
+    "critical": 1,
+    "important": 2,
+    "notable": 2,
+    "opportunity": 1,
+    "total": 6
+  }
+}
