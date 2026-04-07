@@ -1,0 +1,70 @@
+name: Self-Test Codebase Audit Action
+
+on:
+  workflow_dispatch:
+
+permissions:
+  security-events: write
+  contents: read
+
+jobs:
+  audit-json:
+    name: Test JSON output
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./
+        id: audit
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          fail-on: critical
+
+      - name: Verify outputs
+        env:
+          AUDIT_STATUS: ${{ steps.audit.outputs.status }}
+          AUDIT_SCORE: ${{ steps.audit.outputs.health-score }}
+          AUDIT_COUNT: ${{ steps.audit.outputs.findings-count }}
+        run: |
+          echo "Status: $AUDIT_STATUS"
+          echo "Health Score: $AUDIT_SCORE"
+          echo "Findings: $AUDIT_COUNT"
+          test -n "$AUDIT_STATUS" || { echo "::error::No status output"; exit 1; }
+
+  audit-sarif:
+    name: Test SARIF output
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./
+        id: audit
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          format: sarif
+          fail-on: critical
+
+      - name: Verify SARIF file exists
+        env:
+          SARIF_PATH: ${{ steps.audit.outputs.sarif-file }}
+        run: |
+          test -f "$SARIF_PATH" || { echo "::error::No SARIF file produced"; exit 1; }
+          jq '.version' "$SARIF_PATH" | grep -q "2.1.0" || { echo "::error::Invalid SARIF version"; exit 1; }
+
+  audit-baseline:
+    name: Test baseline mode
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./
+        id: audit
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          baseline-only: true
+
+      - name: Verify always passes
+        env:
+          AUDIT_STATUS: ${{ steps.audit.outputs.status }}
+        run: |
+          test "$AUDIT_STATUS" = "pass" || { echo "::error::Baseline mode should always pass"; exit 1; }

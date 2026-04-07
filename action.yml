@@ -1,0 +1,258 @@
+name: 'Codebase Audit'
+description: 'Cold-start codebase audit powered by Claude Code. Finds bugs, security issues, architecture problems, tech debt, and test gaps.'
+author: 'boinger'
+
+branding:
+  icon: 'search'
+  color: 'orange'
+
+inputs:
+  anthropic-api-key:
+    description: 'Anthropic API key for Claude'
+    required: true
+  fail-on:
+    description: 'Fail threshold: critical (default) or important'
+    required: false
+    default: 'critical'
+  format:
+    description: 'Output format: json (default) or sarif'
+    required: false
+    default: 'json'
+  changed-only:
+    description: 'Scope audit to files changed in this PR/branch'
+    required: false
+    default: 'false'
+  baseline-only:
+    description: 'Establish baseline without failing (for CI onboarding)'
+    required: false
+    default: 'false'
+  fail-on-new:
+    description: 'Fail only on new findings vs previous baseline'
+    required: false
+    default: 'false'
+  fail-on-regression:
+    description: 'Also fail if health score regressed'
+    required: false
+    default: 'false'
+  min-severity:
+    description: 'Filter findings to this severity and above: critical, important, notable'
+    required: false
+    default: ''
+  no-infra:
+    description: 'Skip infrastructure scanning'
+    required: false
+    default: 'false'
+  upload-sarif:
+    description: 'Auto-upload SARIF to GitHub Code Scanning (requires security-events: write)'
+    required: false
+    default: 'true'
+  sarif-category:
+    description: 'Category for SARIF upload (disambiguates multiple analysis tools)'
+    required: false
+    default: 'codebase-audit'
+  cache-baseline:
+    description: 'Persist baselines across runs via actions/cache'
+    required: false
+    default: 'true'
+  claude-code-version:
+    description: 'Claude Code CLI version to install (default: latest)'
+    required: false
+    default: 'latest'
+  extra-flags:
+    description: 'Additional flags passed directly to /codebase-audit'
+    required: false
+    default: ''
+
+outputs:
+  status:
+    description: 'Audit result: pass or fail'
+    value: ${{ steps.parse.outputs.status }}
+  health-score:
+    description: 'Codebase health score (0-100)'
+    value: ${{ steps.parse.outputs.health_score }}
+  findings-count:
+    description: 'Number of findings'
+    value: ${{ steps.parse.outputs.findings_count }}
+  sarif-file:
+    description: 'Path to SARIF file (when format=sarif)'
+    value: ${{ steps.parse.outputs.sarif_file }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Verify API key
+      shell: bash
+      run: |
+        if [ -z "${{ inputs.anthropic-api-key }}" ]; then
+          echo "::error::ANTHROPIC_API_KEY is not set. Add it as a repository secret: Settings > Secrets > Actions > New repository secret."
+          exit 1
+        fi
+
+    - name: Restore baseline cache
+      if: inputs.cache-baseline == 'true'
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/codebase-audits
+        key: codebase-audit-baseline-${{ github.repository }}
+
+    - name: Install Claude Code CLI
+      shell: bash
+      run: |
+        if [ "${{ inputs.claude-code-version }}" = "latest" ]; then
+          npm install -g @anthropic-ai/claude-code
+        else
+          npm install -g @anthropic-ai/claude-code@${{ inputs.claude-code-version }}
+        fi
+
+    - name: Install codebase-audit skill
+      shell: bash
+      run: |
+        mkdir -p ~/.claude/skills
+        ln -sf "${{ github.action_path }}" ~/.claude/skills/codebase-audit
+        echo "Skill installed: $(ls -la ~/.claude/skills/codebase-audit/SKILL.md 2>/dev/null && echo 'OK' || echo 'MISSING')"
+
+    - name: Smoke check
+      shell: bash
+      run: |
+        if [ ! -f ~/.claude/skills/codebase-audit/SKILL.md ]; then
+          echo "::error::Skill not discovered after symlink. SKILL.md not found at ~/.claude/skills/codebase-audit/SKILL.md"
+          echo "Action path: ${{ github.action_path }}"
+          echo "Symlink target: $(readlink ~/.claude/skills/codebase-audit 2>/dev/null || echo 'not a symlink')"
+          ls -la ~/.claude/skills/ 2>/dev/null || true
+          exit 1
+        fi
+
+    - name: Build audit command
+      id: build-cmd
+      shell: bash
+      run: |
+        CMD="/codebase-audit --ci"
+        CMD="$CMD --fail-on ${{ inputs.fail-on }}"
+
+        if [ "${{ inputs.format }}" = "sarif" ]; then
+          CMD="$CMD --format sarif"
+        fi
+        if [ "${{ inputs.changed-only }}" = "true" ]; then
+          CMD="$CMD --changed-only"
+        fi
+        if [ "${{ inputs.baseline-only }}" = "true" ]; then
+          CMD="$CMD --baseline-only"
+        fi
+        if [ "${{ inputs.fail-on-new }}" = "true" ]; then
+          CMD="$CMD --fail-on-new"
+        fi
+        if [ "${{ inputs.fail-on-regression }}" = "true" ]; then
+          CMD="$CMD --fail-on-regression"
+        fi
+        if [ -n "${{ inputs.min-severity }}" ]; then
+          CMD="$CMD --min-severity ${{ inputs.min-severity }}"
+        fi
+        if [ "${{ inputs.no-infra }}" = "true" ]; then
+          CMD="$CMD --no-infra"
+        fi
+        if [ -n "${{ inputs.extra-flags }}" ]; then
+          CMD="$CMD ${{ inputs.extra-flags }}"
+        fi
+
+        echo "cmd=$CMD" >> "$GITHUB_OUTPUT"
+        echo "Audit command: $CMD"
+
+    - name: Run codebase audit
+      id: audit
+      shell: bash
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        CODEBASE_AUDIT_HOME: ${{ runner.temp }}/codebase-audits/${{ github.run_id }}
+      run: |
+        mkdir -p "$CODEBASE_AUDIT_HOME"
+        echo "audit_home=$CODEBASE_AUDIT_HOME" >> "$GITHUB_OUTPUT"
+
+        OUTPUT_FILE=$(mktemp)
+        echo "output_file=$OUTPUT_FILE" >> "$GITHUB_OUTPUT"
+
+        # claude --print always exits 0; we parse status from output files
+        claude --print --no-session-persistence --bare --permission-mode bypassPermissions \
+          "${{ steps.build-cmd.outputs.cmd }}" > "$OUTPUT_FILE" 2>&1 || true
+
+    - name: Parse results
+      id: parse
+      shell: bash
+      env:
+        CODEBASE_AUDIT_HOME: ${{ steps.audit.outputs.audit_home }}
+      run: |
+        OUTPUT_FILE="${{ steps.audit.outputs.output_file }}"
+
+        # Primary strategy: read from output files written by the skill
+        if [ "${{ inputs.format }}" = "sarif" ]; then
+          RESULT_FILE=$(find "$CODEBASE_AUDIT_HOME" -name "*-results.sarif" -type f 2>/dev/null | sort | tail -1)
+        else
+          RESULT_FILE=$(find "$CODEBASE_AUDIT_HOME" -name "*-ci-output.json" -type f 2>/dev/null | sort | tail -1)
+        fi
+
+        if [ -z "$RESULT_FILE" ] || [ ! -f "$RESULT_FILE" ]; then
+          echo "::warning::File-based output not found. Falling back to stdout parsing."
+          echo "Audit home contents:"
+          find "$CODEBASE_AUDIT_HOME" -type f 2>/dev/null || echo "  (empty)"
+          RESULT_FILE="$OUTPUT_FILE"
+        fi
+
+        if [ "${{ inputs.format }}" = "sarif" ]; then
+          # SARIF output
+          SARIF_FILE="${{ runner.temp }}/codebase-audit-results.sarif"
+          cp "$RESULT_FILE" "$SARIF_FILE" 2>/dev/null || true
+          echo "sarif_file=$SARIF_FILE" >> "$GITHUB_OUTPUT"
+
+          ERROR_COUNT=$(jq '[.runs[0].results[] | select(.level == "error")] | length' "$RESULT_FILE" 2>/dev/null || echo "0")
+          WARNING_COUNT=$(jq '[.runs[0].results[] | select(.level == "warning")] | length' "$RESULT_FILE" 2>/dev/null || echo "0")
+          TOTAL_RESULTS=$(jq '.runs[0].results | length' "$RESULT_FILE" 2>/dev/null || echo "0")
+
+          echo "findings_count=$TOTAL_RESULTS" >> "$GITHUB_OUTPUT"
+          echo "health_score=" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ inputs.fail-on }}" = "important" ]; then
+            ABOVE_THRESHOLD=$((ERROR_COUNT + WARNING_COUNT))
+          else
+            ABOVE_THRESHOLD=$ERROR_COUNT
+          fi
+
+          if [ "${{ inputs.baseline-only }}" = "true" ] || [ "$ABOVE_THRESHOLD" -eq 0 ]; then
+            echo "status=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=fail" >> "$GITHUB_OUTPUT"
+          fi
+        else
+          # JSON output
+          STATUS=$(jq -r '.status // "pass"' "$RESULT_FILE" 2>/dev/null || echo "pass")
+          HEALTH_SCORE=$(jq -r '.health_score // ""' "$RESULT_FILE" 2>/dev/null || echo "")
+          FINDINGS_COUNT=$(jq -r '.findings_count // "0"' "$RESULT_FILE" 2>/dev/null || echo "0")
+
+          # Override status for baseline-only mode
+          if [ "${{ inputs.baseline-only }}" = "true" ]; then
+            STATUS="pass"
+          fi
+
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "health_score=$HEALTH_SCORE" >> "$GITHUB_OUTPUT"
+          echo "findings_count=$FINDINGS_COUNT" >> "$GITHUB_OUTPUT"
+          echo "sarif_file=" >> "$GITHUB_OUTPUT"
+        fi
+
+        echo "Audit status: $(cat "$GITHUB_OUTPUT" | grep '^status=' | cut -d= -f2)"
+
+    - name: Upload SARIF to GitHub Code Scanning
+      if: inputs.format == 'sarif' && inputs.upload-sarif == 'true' && steps.parse.outputs.sarif_file != ''
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ steps.parse.outputs.sarif_file }}
+        category: ${{ inputs.sarif-category }}
+      continue-on-error: true
+
+    - name: Set exit code
+      shell: bash
+      run: |
+        if [ "${{ steps.parse.outputs.status }}" = "fail" ]; then
+          echo "::error::Codebase audit failed. Found findings above '${{ inputs.fail-on }}' threshold. Health score: ${{ steps.parse.outputs.health_score }}"
+          exit 1
+        else
+          echo "Codebase audit passed. Health score: ${{ steps.parse.outputs.health_score }}. Findings: ${{ steps.parse.outputs.findings_count }}"
+        fi

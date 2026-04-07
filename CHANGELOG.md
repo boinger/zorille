@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.7.0] - 2026-04-06
+
+### Features
+
+- **GitHub Action** (`uses: boinger/codebase-audit@v1`): One-line CI integration. Composite action wraps Claude Code skill invocation with:
+  - All CI flags exposed as action inputs (fail-on, format, changed-only, baseline-only, fail-on-new, etc.)
+  - File-based output parsing (reads from `$AUDIT_HOME`, not stdout) for reliability
+  - Automatic SARIF upload to GitHub Code Scanning when `format: sarif`
+  - Baseline persistence via `actions/cache` for regression tracking across runs
+  - Smoke check validates skill installation before running
+  - Job-level isolation via `$GITHUB_RUN_ID`
+  - Fork PR guard documented in examples
+  - Self-test workflow via `workflow_dispatch`
+
 ## [1.6.0] - 2026-04-06
 
 ### Features

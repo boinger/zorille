@@ -118,7 +118,7 @@ Rough implementation priority based on user value and complexity:
 5. ~~SARIF output format (`--format sarif`) — industry standard for static analysis~~ **SHIPPED v1.4.0**
 6. ~~`--plus-infra` — infrastructure scanning~~ **SHIPPED v1.5.0** (auto-detect, `--no-infra` opt-out, 16 patterns)
 7. `--plan-fixes` — refinement of existing plan output
-8. GitHub Action wrapper — turnkey CI integration
+8. ~~GitHub Action wrapper — turnkey CI integration~~ **SHIPPED v1.7.0**
 9. Schema backward compatibility policy documentation
 10. ~~`--baseline-only` / `--no-fail-first-run` — gentler CI onboarding~~ **SHIPPED v1.6.0**
 11. Expanded language patterns — ongoing, incremental
