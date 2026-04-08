@@ -1,6 +1,6 @@
 ---
 name: codebase-audit
-version: 1.9.0
+version: 1.9.1
 description: |
   Full codebase audit. Analyzes an entire project cold, no diff, no branch context,
   producing a structured report covering bugs, security issues, architectural problems,
@@ -32,6 +32,11 @@ to verify by running Y" is better than a confident wrong answer.
 ## Preamble (run first)
 
 ```bash
+# Shared helper scripts (invoke via: bash "$REPO_ROOT/lib/<script>.sh" <args>)
+#   lib/slug.sh         — canonical repo slug (used below for SLUG=)
+#   lib/probe-exists.sh — probe sentinel files for existence, always exits 0.
+#                         Use this INSTEAD OF `ls` for probing missing-file-safe.
+#                         See Key Rule 2d for why.
 _BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
 echo "BRANCH: $_BRANCH"
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
@@ -41,7 +46,7 @@ AUDIT_HOME="${CODEBASE_AUDIT_HOME:-$HOME/.codebase-audits}"
 echo "AUDIT_HOME: $AUDIT_HOME"
 ```
 
-The `lib/slug.sh` script is a load-bearing contract shared with `/plan-fixes`. Both skills must compute the same slug for the same repo. Do not inline the slug derivation here — always invoke the shared script so drift is impossible. If you're running this skill from a context where `lib/slug.sh` is unreachable (e.g., tests in a fixture repo), the fallback is the repo basename.
+Both `lib/slug.sh` and `lib/probe-exists.sh` are load-bearing contracts shared with `/plan-fixes`. Both skills must compute the same slug for the same repo (slug contract) and use the same probe semantics for sentinel files (probe contract). Do not inline either derivation — always invoke the shared scripts so drift is impossible. If you're running this skill from a context where `lib/slug.sh` is unreachable (e.g., tests in a fixture repo), the fallback is the repo basename.
 
 # /codebase-audit — Cold-Start Codebase Audit
 
@@ -142,28 +147,24 @@ echo "Audit storage: $AUDIT_HOME/$SLUG/audits/"
 
 ### 1.2 Language and framework detection
 
-Scan for build files, configs, and entry points to detect the tech stack. **Use the canonical probe pattern from Key Rule 2d** — `for` loop with `test -e`, not `ls` with a wall of paths. `ls` exits non-zero when any listed path is missing, which cascade-cancels sibling parallel tools in Claude Code and produces red "Cancelled" noise for the user.
-
 ```bash
-for f in package.json Cargo.toml go.mod pyproject.toml Gemfile build.gradle pom.xml Makefile CMakeLists.txt composer.json mix.exs; do
-  [ -e "$f" ] && echo "$f"
-done
-# Glob matches (may expand to nothing) handled separately via find to keep the loop simple:
+bash "$REPO_ROOT/lib/probe-exists.sh" package.json Cargo.toml go.mod pyproject.toml Gemfile build.gradle pom.xml Makefile CMakeLists.txt composer.json mix.exs
+# Glob matches (may expand to nothing) use find directly to keep the loop simple:
 find . -maxdepth 1 \( -name '*.csproj' -o -name '*.sln' \) 2>/dev/null
 ```
 
-Also scan for infrastructure config files with the same pattern:
+**Do not use `ls` to probe for sentinel files** — see Key Rule 2d. `ls` exits non-zero when any listed path is missing, which cascade-cancels sibling parallel tool calls in Claude Code and produces red "Cancelled" noise for the user. `lib/probe-exists.sh` always exits 0 and prints only the files that exist.
+
+Also scan for infrastructure config files with the same script:
 
 ```bash
-for f in Dockerfile docker-compose.yml docker-compose.yaml nginx.conf; do
-  [ -e "$f" ] && echo "$f"
-done
+bash "$REPO_ROOT/lib/probe-exists.sh" Dockerfile docker-compose.yml docker-compose.yaml nginx.conf
 find .github/workflows -maxdepth 1 \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null
 find . -maxdepth 3 \( -name '*.tf' -o -name '*.tfvars' \) -not -path '*/node_modules/*' -not -path '*/vendor/*' -not -path '*/.git/*' 2>/dev/null | head -5
 find . -maxdepth 3 \( -path '*/k8s/*.yaml' -o -path '*/k8s/*.yml' -o -path '*/deploy/*.yaml' -o -path '*/deploy/*.yml' -o -name 'Chart.yaml' \) -not -path '*/node_modules/*' -not -path '*/vendor/*' -not -path '*/.git/*' 2>/dev/null | head -5
 ```
 
-`find` already exits 0 when nothing matches, so no `|| true` tail is needed on those. The `for` loops emit only files that actually exist — no noise, no cascade-cancel risk.
+`find` already exits 0 when nothing matches, so no `|| true` tail is needed on those. `probe-exists.sh` emits only files that actually exist — no noise, no cascade-cancel risk.
 
 If any infrastructure files are found, note "Infrastructure files detected" for use in Phase 3.1 (auto-loading the infra checklist). This detection is informational — the `--no-infra` flag controls whether infra patterns actually run.
 
@@ -509,15 +510,63 @@ Schema:
 
 The `has_suggested_fix` field is present when `--suggest-fixes` was used. The `quick_fix_status` field is present when `--quick-fix` was used — values are `"applied"`, `"skipped"`, or omitted. The `quick_fix_applied` top-level field is `true` when `--quick-fix` was active. Omit all these fields when the corresponding flag was not used — old baselines won't have them, and consumers should treat missing fields as `false`/`null`. The finding ID hash does NOT include these fields (it's based on `file:category:title` only), so adding or removing fix suggestions or quick-fix status doesn't change finding identity for regression tracking.
 
-Each finding gets a deterministic content-based ID for stable regression comparison. Compute it as:
+Each finding gets a deterministic content-based ID for stable regression comparison. The canonical pattern is a **single-quoted heredoc with `__HASH_N__` placeholders, then a sed pass** to replace them with pre-computed hashes. This pattern is load-bearing: writing `$(echo -n ... | shasum)` inline inside any heredoc is a trap — single-quoted heredocs don't expand substitutions (so the literal string gets written to the file instead of the hash), and unquoted heredocs expand every `$` in the body (so any finding title containing a literal `$` gets mangled by environment variable expansion). The placeholder+sed approach closes both traps by construction.
 
 ```bash
-echo -n "file:category:title" | shasum -a 256 | cut -d' ' -f1
+# Pick the available hash tool once, up front. shasum is on macOS by default;
+# sha256sum is on most Linux distributions via coreutils. If neither exists,
+# fail loudly rather than silently writing empty id fields.
+if command -v shasum >/dev/null 2>&1; then
+  _sha() { echo -n "$1" | shasum -a 256 | cut -d' ' -f1; }
+elif command -v sha256sum >/dev/null 2>&1; then
+  _sha() { echo -n "$1" | sha256sum | cut -d' ' -f1; }
+else
+  echo "ERROR: neither shasum nor sha256sum available. Install one to enable baseline regression tracking." >&2
+  exit 1
+fi
+
+# Compute hashes for each finding FIRST, before the heredoc.
+# _sha handles the file:category:title canonicalization; pass the raw string.
+H1=$(_sha "src/api/users.ts:security:SQL injection in user search")
+H2=$(_sha "src/api/auth.ts:error-handling:Bare except clause")
+# ... one per finding
+
+# Write the baseline with placeholder tokens. Single-quoted heredoc
+# (<<'EOF') disables ALL expansion, so finding titles containing $ or
+# backticks or $(...) are safe by construction.
+BASELINE="$AUDIT_HOME/$SLUG/audits/${DT}-baseline.json"
+cat > "$BASELINE" <<'EOF'
+{
+  "version": "1.0.0",
+  "findings": [
+    {"id": "__HASH_1__", "severity": "critical", "title": "SQL injection in user search", "file": "src/api/users.ts", "line": 42},
+    {"id": "__HASH_2__", "severity": "important", "title": "Bare except clause", "file": "src/api/auth.ts", "line": 15}
+  ]
+}
+EOF
+
+# Then replace placeholders with computed hashes in one sed pass.
+# Use | as the sed delimiter (matches lib/slug.sh convention).
+# The .bak/rm dance works on both GNU sed and BSD sed without flag conflicts.
+sed -i.bak \
+  -e "s|__HASH_1__|$H1|g" \
+  -e "s|__HASH_2__|$H2|g" \
+  "$BASELINE"
+rm -f "$BASELINE.bak"
+
+# Integrity guard: verify all placeholders were replaced. If any __HASH_N__
+# token remains in the file, a finding was added to the heredoc without a
+# corresponding sed substitution. This is a silent-failure trap — the
+# baseline would be valid JSON but contain literal "__HASH_3__" strings in
+# id fields, breaking regression comparison the same way the original bug
+# did. Fail loudly so the error is visible at audit time, not later.
+if grep -q '__HASH_' "$BASELINE"; then
+  echo "ERROR: baseline contains unresolved __HASH_ placeholders at $BASELINE. A finding was added without a corresponding sed substitution. Delete the broken baseline and fix Phase 4.4." >&2
+  exit 1
+fi
 ```
 
-For example: `echo -n "browse/src/write-commands.ts:security:Missing path validation on upload" | shasum -a 256 | cut -d' ' -f1`
-
-Run this for each finding and use the resulting hash as the `id` field. This ensures findings match across runs even if their order changes.
+Run this pattern for every finding in the baseline — one `H<N>` variable per finding, one sed `-e` expression per finding, all inside a single sed invocation. The integrity guard at the end is non-negotiable: it's the difference between "loud bug at audit time" and "silent regression-comparison corruption discovered weeks later."
 
 ### 4.5 Regression comparison
 
@@ -1053,15 +1102,13 @@ Print:
    **2c. When reading files, read targeted line ranges, not whole files.** Pick 20–50 lines around the finding, not the whole function body unless the function is short. If you need more context after the first Read, do a second targeted Read — that's cheaper than one giant Read that dumps hundreds of lines. Unread code also isn't useful to the user — they can look at the file themselves.
 
    **2d. Every probe command MUST exit 0 — even when the target doesn't exist.** This matters because Claude Code batches Bash calls in parallel, and a single non-zero exit in the batch cascade-cancels its sibling tools. The user sees red "Cancelled" messages for work that had nothing wrong with it. The trap is `ls` — `ls /nonexistent 2>/dev/null` still exits 1 even though stderr is suppressed. Common fixes:
-   - **Probing sentinel files** (does `Dockerfile` / `pyproject.toml` / `.github/workflows` exist?): use a `for` loop with `test -e`, never a multi-path `ls`:
+   - **Probing sentinel files** (does `Dockerfile` / `pyproject.toml` / `.github/workflows` exist?): **use `lib/probe-exists.sh`**, NEVER `ls` with a wall of paths:
      ```bash
-     for f in pyproject.toml Makefile Dockerfile .github/workflows; do
-       [ -e "$f" ] && echo "$f"
-     done
+     bash "$REPO_ROOT/lib/probe-exists.sh" pyproject.toml Makefile Dockerfile .github/workflows
      ```
-     Clean output (only existing files), always exits 0, no `|| true` gymnastics.
-   - **If you really need `ls`**, append `|| true`: `ls -la foo.txt 2>/dev/null || true`. But the `for` pattern is strictly better for existence probing.
-   - **`find`** already exits 0 when nothing matches — use `find` in preference to `ls` when enumerating.
+     The script is a load-bearing shared contract (see preamble). It always exits 0 and prints only files that actually exist, one per line. Clean output, no `|| true` gymnastics, no cascade-cancel risk. If you need to probe files and find yourself writing an `ls`, stop and use the script instead. `ls` is for listing directories you intend to read in full, not for probing existence.
+   - **If you really need `ls`** for something other than probing (e.g., listing the contents of a directory you know exists), append `|| true`: `ls -la foo.txt 2>/dev/null || true`.
+   - **`find`** already exits 0 when nothing matches — use `find` in preference to `ls` when enumerating files by pattern.
    - **`grep`** exits 1 when nothing matches — append `|| true` when using grep in a pipeline whose failure would cascade.
    - **`git` commands against missing refs/remotes/files** — append `|| true` or wrap in `if git rev-parse ... >/dev/null 2>&1; then ...`.
 

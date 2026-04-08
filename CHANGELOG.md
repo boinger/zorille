@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.9.1] - 2026-04-08
+
+### Fixes
+
+- **Baseline JSON hash computation (Phase 4.4).** The v1.9.0 pattern (`echo -n ... | shasum` inline inside a heredoc) had a silent-corruption bug: if the heredoc used `<<'EOF'` (single-quoted, which is the correct choice for suppressing accidental expansion of `$SLUG` etc. in the body), the inline substitution also got suppressed and the baseline was written with literal `$(echo -n ... | shasum)` strings in the `id` fields instead of computed SHA-256 hashes. Regression comparison then silently broke on the next audit run — every finding appeared "new" because the ids didn't match.
+
+  Fixed by switching to a **placeholder + sed** pattern: compute hashes into shell variables first, write the heredoc with `__HASH_N__` placeholder tokens (single-quoted so nothing expands), then `sed -i.bak -e "s|__HASH_N__|$HN|g"` to substitute them in. Zero expansion surface inside the heredoc means finding titles containing literal `$` (e.g., `"Missing $PATH validation"`) are safe by construction. Includes a tool fallback (`shasum` → `sha256sum`) and a post-sed integrity guard that fails loudly if any `__HASH_N__` placeholder remains unreplaced.
+
+- **Sentinel file probing (Phase 1.2 + Key Rule 2d).** v1.9.0 documented a probe pattern (`for f in ...; do [ -e "$f" ] && echo "$f"; done`) and promoted Key Rule 2d to enforce it, but the LLM still wrote `ls -la /absolute/path/... /Dockerfile /.github/workflows 2>/dev/null` in live audits, cascade-cancelling sibling parallel tool calls when any probed file was missing. Root cause: inline code blocks get paraphrased; named scripts get copied verbatim.
+
+  Fixed by extracting the probe pattern into `lib/probe-exists.sh` as a shared script (parallels the existing `lib/slug.sh` v1.9.0 pattern). The SKILL.md preamble now includes a comment block referencing both helper scripts, and Phase 1.2 leads with the literal `bash "$REPO_ROOT/lib/probe-exists.sh" <files>...` invocation as its first code block. Rule 2d is updated to forbid `ls` for probing and point at the script. Belt-and-suspenders placement (preamble + Phase 1.2) addresses the transmission failure the v1.9.0 inline approach hit.
+
+### Tests
+
+- New slice-scoped structural assertions in `test/skill-validation.test.ts` for Phase 4.4 (5 assertions) and Phase 1.2 (3 assertions including a `ls -la` regression guard scoped to the Phase 1.2 section slice only, so legitimate `ls -la` elsewhere in SKILL.md can't trip the guard).
+- New `test/probe-exists-contract.test.ts` (mirror of `test/slug-contract.test.ts`): 10 tests covering script metadata, behavioral fixtures (happy path / no files / mixed / spaces / directories / broken symlinks / zero args), and the cross-SKILL.md grep contract.
+- New `test/phase44-hash-behavior.test.ts`: 5 tests that actually execute the Phase 4.4 pattern against fixture findings (including one with a literal `$PATH` in the title), parse the resulting baseline, assert every `finding.id` matches `/^[a-f0-9]{64}$/`, and verify hashes are deterministic across repeated runs. Catches regression even if the SKILL.md prose rewrites around the structural assertions.
+
+Test count: 218 → 236 (+18 new assertions across 3 test files). All passing.
+
 ## [1.9.0] - 2026-04-07
 
 ### Architecture

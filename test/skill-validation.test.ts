@@ -202,10 +202,40 @@ describe("Skill structure validation", () => {
     expect(skillMd).toContain("wc -l");
     // 2c: targeted reads rule of thumb
     expect(skillMd).toMatch(/~30 lines/);
-    // 2d: probe commands exit 0, cascade-cancel hazard named, canonical for-loop pattern
+    // 2d: probe commands exit 0, cascade-cancel hazard named, canonical script invocation
     expect(skillMd).toContain("cascade-cancel");
-    expect(skillMd).toContain("[ -e");
-    expect(skillMd).toMatch(/for f in[\s\S]+?\[ -e "\$f" \] && echo "\$f"/);
+    // v1.9.1: Rule 2d now references lib/probe-exists.sh as the canonical probe form.
+    // The inline for-loop from v1.9.0 was insufficient because the LLM paraphrased it
+    // back into `ls`. Naming a script that must be invoked verbatim is strictly more
+    // transmission-reliable.
+    expect(skillMd).toContain("lib/probe-exists.sh");
+    expect(skillMd).toMatch(/bash\s+["']?\$\{?REPO_ROOT\}?\/lib\/probe-exists\.sh/);
+  });
+
+  test("Preamble references both shared helper scripts (slug.sh + probe-exists.sh)", () => {
+    // Both scripts must be named in the preamble comment block so the LLM sees
+    // them on every phase entry. See v1.9.1 plan Issue 2 Option D placement.
+    const preamble = skillMd.match(/## Preamble[\s\S]*?(?=\n## )/)?.[0] ?? "";
+    expect(preamble.length).toBeGreaterThan(100);
+    expect(preamble).toContain("lib/slug.sh");
+    expect(preamble).toContain("lib/probe-exists.sh");
+  });
+
+  test("Phase 1.2 leads with lib/probe-exists.sh invocation (v1.9.1 transmission fix)", () => {
+    // Slice-scoped to Phase 1.2 only. Regression guard for the cascade-cancel bug:
+    // Phase 1.2 must not contain `ls -la` anywhere (it's the probe phase, not a
+    // directory-listing phase), and it must contain the literal lib/probe-exists.sh
+    // invocation. Using section-slice scoping so legitimate `ls -la` in other
+    // phases (if ever added) doesn't trip this guard.
+    const phase12 = skillMd.match(/### 1\.2 [\s\S]*?(?=\n### )/)?.[0] ?? "";
+    expect(phase12.length).toBeGreaterThan(200);
+
+    // Positive signal: canonical script invocation present
+    expect(phase12).toContain("lib/probe-exists.sh");
+    expect(phase12).toMatch(/bash\s+["']?\$\{?REPO_ROOT\}?\/lib\/probe-exists\.sh/);
+
+    // Negative signal: no `ls -la` regression (this is the v1.9.0 bug the fix addresses)
+    expect(phase12).not.toContain("ls -la");
   });
 
   test("Phase 1.7 dependency check uses jq to filter vulnerabilities", () => {
@@ -217,6 +247,39 @@ describe("Skill structure validation", () => {
     expect(skillMd).toContain("No dependency vulnerabilities.");
     // Fallback when jq is unavailable
     expect(skillMd).toMatch(/jq.*not installed|fall back/i);
+  });
+
+  test("Phase 4.4 baseline hash uses placeholder + sed pattern (v1.9.1)", () => {
+    // v1.9.1 fix for the baseline heredoc quoting bug: the canonical hash
+    // pattern is compute-first → single-quoted heredoc with __HASH_N__
+    // placeholders → sed substitution → integrity guard. Assertions are
+    // slice-scoped to the Phase 4.4 section only so legitimate uses of
+    // shasum/heredoc/sed elsewhere in SKILL.md don't trigger false positives.
+    const phase44 = skillMd.match(/### 4\.4 [\s\S]*?(?=\n### )/)?.[0] ?? "";
+    expect(phase44.length).toBeGreaterThan(500); // sanity check — slice extracted
+
+    // 1. Compute-first helper function pattern — catches regression to
+    //    inline $(echo -n ... | shasum) substitution inside a heredoc.
+    expect(phase44).toContain("_sha(");
+    // Tool fallback: both shasum and sha256sum must be present.
+    expect(phase44).toContain("shasum");
+    expect(phase44).toContain("sha256sum");
+
+    // 2. Placeholder tokens are the positive signal for the new approach.
+    expect(phase44).toContain("__HASH_");
+
+    // 3. Sed substitution pass: both `sed -i.bak` (cross-platform form)
+    //    and the `|`-delimited replacement (matches lib/slug.sh convention).
+    expect(phase44).toContain("sed -i.bak");
+    expect(phase44).toContain("s|__HASH_");
+
+    // 4. Specific bug regression guard: the exact broken form from v1.8.0
+    //    (inline command substitution inside a heredoc body) must NOT appear.
+    expect(phase44).not.toContain('"id": "$(echo');
+
+    // 5. Integrity guard: the post-sed grep check that catches implementers
+    //    who add a finding without a corresponding sed substitution.
+    expect(phase44).toContain("grep -q '__HASH_'");
   });
 
   test("has voice directive", () => {
