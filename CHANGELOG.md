@@ -1,5 +1,56 @@
 # Changelog
 
+## [1.9.2] - 2026-04-08
+
+### Fixes
+
+- **Shared-script path resolution (Phase 1 preamble).** v1.9.0 and v1.9.1 invoked the shared helper scripts `lib/slug.sh` and `lib/probe-exists.sh` via `$REPO_ROOT/lib/<script>.sh`, where `$REPO_ROOT` comes from `git rev-parse --show-toplevel` — i.e., the git root of the **audit target**, not the skill's install directory. For every audit target that wasn't the codebase-audit repo itself, neither script was reachable:
+  - `lib/slug.sh` silently fell back to `basename "$REPO_ROOT"`, producing non-canonical slugs (e.g., `pr-owl` instead of `boinger-pr-owl`). Baselines were written under the basename slug at `$AUDIT_HOME/<basename>/` and `/plan-fixes` auto-discovery stayed in sync by making the same fallback. **Broken since v1.9.0.**
+  - `lib/probe-exists.sh` had no built-in fallback. The LLM defensively hedged with inline `|| ls <guessed files>` fallbacks in Phase 1.2, which happened to work when the guesses panned out and cascade-cancelled when they didn't. **Broken since v1.9.1.**
+
+  Root cause was architectural, not script-level: `lib/slug.sh` and `lib/probe-exists.sh` themselves are correct and unchanged in v1.9.2. The bug was exclusively in how the SKILL.md preambles referenced them.
+
+  Fix introduces `LIB_DIR` in both SKILL.md preambles, defaulted to `$HOME/.claude/skills/codebase-audit/lib` (the standard `./setup` install path) with an env var override via `CODEBASE_AUDIT_LIB_DIR`. All script invocations now go through `$LIB_DIR`, not `$REPO_ROOT`. Both skills share the same `$LIB_DIR` default (the shared lib lives in the codebase-audit install; `/plan-fixes` references it via the same path).
+
+- **Stale-symlink warning.** The preamble now emits a one-line stderr warning if `$LIB_DIR` doesn't exist (e.g., deleted dev clone, broken symlink, misconfigured env var). `[ -d "$LIB_DIR" ] || echo "WARNING: ..." >&2`. Cheap insurance — makes misconfiguration diagnosable at first glance instead of surfacing as mysterious downstream Phase 1.2 failures. Especially matters in v1.9.2 because the new "fail loudly on probe-exists.sh" design removes the LLM's defensive fallback.
+
+### Why this wasn't caught sooner
+
+This is worth documenting explicitly so future maintenance passes don't repeat the pattern:
+
+- **The existing contract tests bypassed the broken preamble entirely.** `test/slug-contract.test.ts` and `test/probe-exists-contract.test.ts` invoke the scripts via absolute paths (`path.join(ROOT, "lib", "slug.sh")`), verifying the scripts work in isolation. They never exercised the SKILL.md preamble's lookup path — where the bug actually lived. Passing contract tests gave false confidence that the whole chain worked.
+
+- **Self-hosted testing masked the bug.** During v1.9.0 and v1.9.1 development, every test run against the codebase-audit repo itself worked because `$REPO_ROOT` happens to equal the skill install directory in that specific case. The bug only became visible when a user ran `/codebase-audit` against a project that wasn't codebase-audit.
+
+- **The cross-ref assertions grepped for script names, not invocation paths.** Tests like "both SKILL.md files invoke lib/slug.sh identically" matched the substring `"lib/slug.sh"` without validating the `$REPO_ROOT` prefix. They would have passed just fine even if the prefix was `$REPO_ROOT`, `$LIB_DIR`, or `$NONSENSE_VARIABLE`.
+
+### New test class: `test/preamble-contract.test.ts`
+
+This release adds a new behavioral test that closes the testing gap above. The test extracts the preamble bash block from each SKILL.md by content anchor (finding the fence that starts with `LIB_DIR=`), executes it against a temp directory that is NOT the codebase-audit repo, and asserts the shared scripts actually resolve and run. It catches the exact class of bug that escaped v1.9.0 and v1.9.1.
+
+**If you're considering deleting `test/preamble-contract.test.ts` because it seems to overlap with `test/slug-contract.test.ts` or `test/probe-exists-contract.test.ts`, don't.** Those tests verify the scripts work when invoked via absolute path. This test verifies the SKILL.md preamble can find and invoke them the way the LLM will at runtime. They are testing different things:
+
+| Test | What it exercises | What it catches |
+|---|---|---|
+| `slug-contract.test.ts` | `lib/slug.sh` invoked via absolute path against fixture repos | Script-level bugs in slug derivation logic |
+| `probe-exists-contract.test.ts` | `lib/probe-exists.sh` invoked via absolute path against fixture files | Script-level bugs in probe logic |
+| `preamble-contract.test.ts` (NEW) | The full SKILL.md preamble bash block executed from a non-codebase-audit repo with `CODEBASE_AUDIT_LIB_DIR` plumbing | **Preamble-level bugs** in how the skill references its shared scripts (exactly the v1.9.0/v1.9.1 class of bug) |
+
+All three are load-bearing and complementary.
+
+### Tests
+
+- +4 structural assertions in `test/skill-validation.test.ts` (both codebase-audit and plan-fixes SKILL.md files): `LIB_DIR` presence with `CODEBASE_AUDIT_LIB_DIR` env var fallback, stale-symlink warning presence
+- +7 behavioral tests in the new `test/preamble-contract.test.ts`: bash block extraction from both SKILL.md files, end-to-end execution against a fake fixture repo, canonical slug resolution, probe-exists.sh chained invocation via `$LIB_DIR`, stale-symlink warning firing, env var override working
+- Existing cross-ref assertions in `test/slug-contract.test.ts`, `test/probe-exists-contract.test.ts`, and `test/skill-validation.test.ts` tightened to match the `$LIB_DIR/` form instead of the old `$REPO_ROOT/lib/` form (net 0 assertion count change; same greps, narrower patterns)
+
+Test count: 236 → 247 (+11). All passing.
+
+### Upgrade notes
+
+- **Existing baselines at wrong slug paths are not backfilled.** If you have audit history at `~/.codebase-audits/<basename>/` (e.g., `~/.codebase-audits/give-back/` instead of the canonical `~/.codebase-audits/<owner-repo>/`), those baselines stay where they are. v1.9.2 writes to the canonical slug path going forward, which means the first post-v1.9.2 audit of any previously-audited project starts a fresh regression baseline. If you care about regression continuity, either copy your old baselines to the new path manually or accept the seam.
+- **No migration required for users who haven't run any external audits.** If you've only ever run `/codebase-audit` against the codebase-audit repo itself (self-audit), the slug resolved correctly under v1.9.0/v1.9.1 by coincidence and v1.9.2 produces the same slug. Nothing to do.
+
 ## [1.9.1] - 2026-04-08
 
 ### Fixes

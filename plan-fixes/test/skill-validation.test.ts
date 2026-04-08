@@ -45,7 +45,30 @@ describe("/plan-fixes skill structure", () => {
   });
 
   test("Phase 1 references the shared slug contract", () => {
-    expect(skillMd).toMatch(/bash\s+["']?\$\{?REPO_ROOT\}?\/lib\/slug\.sh/);
+    // v1.9.2: invocation uses $LIB_DIR (codebase-audit's install lib dir,
+    // shared with /plan-fixes), not $REPO_ROOT (audit target's git root).
+    expect(skillMd).toMatch(/bash\s+["']?\$\{?LIB_DIR\}?\/slug\.sh/);
+  });
+
+  test("Preamble defines LIB_DIR with CODEBASE_AUDIT_LIB_DIR env var fallback (v1.9.2)", () => {
+    // v1.9.2 fixed a shared-script lookup bug. /plan-fixes's preamble
+    // mirrors /codebase-audit's: $LIB_DIR defaults to the codebase-audit
+    // install's lib directory (both skills share the same lib path).
+    // Match until the next h2+ heading (two hashes) — avoids matching
+// single-hash comment lines inside the bash code block.
+const preamble = skillMd.match(/## Preamble[\s\S]*?(?=\n## )/)?.[0] ?? "";
+    expect(preamble).toContain("LIB_DIR=");
+    expect(preamble).toContain("CODEBASE_AUDIT_LIB_DIR");
+    expect(preamble).toContain("$HOME/.claude/skills/codebase-audit/lib");
+  });
+
+  test("Preamble has stale-symlink warning for missing LIB_DIR (v1.9.2)", () => {
+    // Match until the next h2+ heading (two hashes) — avoids matching
+// single-hash comment lines inside the bash code block.
+const preamble = skillMd.match(/## Preamble[\s\S]*?(?=\n## )/)?.[0] ?? "";
+    expect(preamble).toMatch(/\[ -d "\$LIB_DIR" \]/);
+    expect(preamble).toContain("WARNING:");
+    expect(preamble).toContain("does not exist");
   });
 
   test("Phase 1 documents baseline.json schema fields", () => {

@@ -90,7 +90,13 @@ describe("slug derivation contract (lib/slug.sh)", () => {
     // When it does exist, both files must contain the same invocation pattern.
     if (fs.existsSync(pfSkillPath)) {
       const pfSkill = fs.readFileSync(pfSkillPath, "utf-8");
-      const pattern = /bash\s+["']?\$\{?REPO_ROOT\}?\/lib\/slug\.sh["']?/;
+      // v1.9.2: both SKILL.md files must invoke slug.sh via $LIB_DIR
+      // (the skill's install directory), NOT $REPO_ROOT (the audit target's
+      // git root). $REPO_ROOT points at whatever project the skill is
+      // auditing, which almost never contains a lib/slug.sh. The broken
+      // form passed earlier contract tests because those tests invoked the
+      // script via absolute path, bypassing the SKILL.md preamble entirely.
+      const pattern = /bash\s+["']?\$\{?LIB_DIR\}?\/slug\.sh["']?/;
       expect(cbaSkill).toMatch(pattern);
       expect(pfSkill).toMatch(pattern);
     } else {

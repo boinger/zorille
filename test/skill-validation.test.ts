@@ -209,7 +209,9 @@ describe("Skill structure validation", () => {
     // back into `ls`. Naming a script that must be invoked verbatim is strictly more
     // transmission-reliable.
     expect(skillMd).toContain("lib/probe-exists.sh");
-    expect(skillMd).toMatch(/bash\s+["']?\$\{?REPO_ROOT\}?\/lib\/probe-exists\.sh/);
+    // v1.9.2: invocation uses $LIB_DIR (skill install dir), not $REPO_ROOT
+    // (audit target's git root). See Key Rule 2d + preamble comment block.
+    expect(skillMd).toMatch(/bash\s+["']?\$\{?LIB_DIR\}?\/probe-exists\.sh/);
   });
 
   test("Preamble references both shared helper scripts (slug.sh + probe-exists.sh)", () => {
@@ -219,6 +221,31 @@ describe("Skill structure validation", () => {
     expect(preamble.length).toBeGreaterThan(100);
     expect(preamble).toContain("lib/slug.sh");
     expect(preamble).toContain("lib/probe-exists.sh");
+  });
+
+  test("Preamble defines LIB_DIR with CODEBASE_AUDIT_LIB_DIR env var fallback (v1.9.2)", () => {
+    // v1.9.2 fixed a shared-script lookup bug: v1.9.0 and v1.9.1 invoked
+    // lib/*.sh via $REPO_ROOT (the audit target's git root) instead of the
+    // skill's install directory, so both scripts silently failed to load
+    // for any audit target that wasn't codebase-audit itself. The fix
+    // introduces $LIB_DIR in the preamble, defaulted to the standard
+    // ./setup install path and overridable via CODEBASE_AUDIT_LIB_DIR.
+    const preamble = skillMd.match(/## Preamble[\s\S]*?(?=\n## )/)?.[0] ?? "";
+    expect(preamble).toContain("LIB_DIR=");
+    expect(preamble).toContain("CODEBASE_AUDIT_LIB_DIR");
+    expect(preamble).toContain("$HOME/.claude/skills/codebase-audit/lib");
+  });
+
+  test("Preamble has stale-symlink warning for missing LIB_DIR (v1.9.2)", () => {
+    // Cheap stderr warning at the start of the preamble so users with
+    // broken symlinks get a diagnosable first-line message instead of
+    // mysterious downstream Phase 1.2 failures. This matters because
+    // the new "fail loudly on probe-exists.sh" design removes the LLM's
+    // defensive fallback — if LIB_DIR is wrong, Phase 1.2 breaks visibly.
+    const preamble = skillMd.match(/## Preamble[\s\S]*?(?=\n## )/)?.[0] ?? "";
+    expect(preamble).toMatch(/\[ -d "\$LIB_DIR" \]/);
+    expect(preamble).toContain("WARNING:");
+    expect(preamble).toContain("does not exist");
   });
 
   test("Phase 1.2 leads with lib/probe-exists.sh invocation (v1.9.1 transmission fix)", () => {
@@ -232,7 +259,13 @@ describe("Skill structure validation", () => {
 
     // Positive signal: canonical script invocation present
     expect(phase12).toContain("lib/probe-exists.sh");
-    expect(phase12).toMatch(/bash\s+["']?\$\{?REPO_ROOT\}?\/lib\/probe-exists\.sh/);
+    // v1.9.2: invocation uses $LIB_DIR (the skill's install directory),
+    // NOT $REPO_ROOT (the audit target). This is the test that would have
+    // failed earlier if any of v1.9.0/v1.9.1's self-hosted testing had
+    // bothered to assert the actual invocation syntax — but the v1.9.1
+    // assertion used $REPO_ROOT because that's what the buggy SKILL.md
+    // had. The v1.9.2 fix + this assertion together close the loop.
+    expect(phase12).toMatch(/bash\s+["']?\$\{?LIB_DIR\}?\/probe-exists\.sh/);
 
     // Negative signal: no `ls -la` regression (this is the v1.9.0 bug the fix addresses)
     expect(phase12).not.toContain("ls -la");

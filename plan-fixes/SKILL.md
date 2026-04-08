@@ -26,16 +26,20 @@ No filler, no corporate tone, no academic hedging. Sound like a senior engineer 
 ## Preamble (run first)
 
 ```bash
+# Shared helper scripts (invoke via: bash "$LIB_DIR/<script>.sh" <args>)
+#   lib/slug.sh — canonical repo slug, shared with /codebase-audit
+LIB_DIR="${CODEBASE_AUDIT_LIB_DIR:-$HOME/.claude/skills/codebase-audit/lib}"
+[ -d "$LIB_DIR" ] || echo "WARNING: $LIB_DIR does not exist. Run ./setup from the codebase-audit repo (or set CODEBASE_AUDIT_LIB_DIR)." >&2
 _BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
 echo "BRANCH: $_BRANCH"
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
-SLUG=$(bash "$REPO_ROOT/lib/slug.sh" 2>/dev/null || basename "$REPO_ROOT")
+SLUG=$(bash "$LIB_DIR/slug.sh" 2>/dev/null || basename "$REPO_ROOT")
 echo "SLUG: $SLUG"
 AUDIT_HOME="${CODEBASE_AUDIT_HOME:-$HOME/.codebase-audits}"
 echo "AUDIT_HOME: $AUDIT_HOME"
 ```
 
-The `lib/slug.sh` script is a load-bearing contract shared with `/codebase-audit`. Both skills must compute the same slug for the same repo, otherwise `/plan-fixes`'s auto-discovery cannot find the baseline `/codebase-audit` just wrote. Do not inline the slug derivation here — always invoke the shared script so drift is impossible.
+The `lib/slug.sh` script is a load-bearing contract shared with `/codebase-audit`. Both skills must compute the same slug for the same repo, otherwise `/plan-fixes`'s auto-discovery cannot find the baseline `/codebase-audit` just wrote. Do not inline the slug derivation here — always invoke the shared script so drift is impossible. `$LIB_DIR` points at the codebase-audit install's lib directory (both skills use the same path); the env var override `CODEBASE_AUDIT_LIB_DIR` handles non-standard installs.
 
 # /plan-fixes — Findings-to-Plans Translator
 
@@ -357,7 +361,7 @@ For option B, after the user provides numbers, proceed with only the selected pl
 ## Key Rules
 
 1. **Never modify source code.** This skill's only Write operations are plan files under `$AUDIT_HOME/$SLUG/plans/`. Fix application happens in `/codebase-audit --quick-fix`, not here.
-2. **Slug derivation is a shared contract.** Always invoke `bash "$REPO_ROOT/lib/slug.sh"` — never inline the derivation. The `lib/slug.sh` file lives in the repo root (one level up from `plan-fixes/`) and is shared with `/codebase-audit`.
+2. **Slug derivation is a shared contract.** Always invoke `bash "$LIB_DIR/slug.sh"` — never inline the derivation, and never reference it via `$REPO_ROOT/lib/slug.sh` (that's the audit target's git root, which doesn't contain the script). `$LIB_DIR` is defined in the preamble as `${CODEBASE_AUDIT_LIB_DIR:-$HOME/.claude/skills/codebase-audit/lib}` and points at the codebase-audit install's lib directory, which is shared between `/plan-fixes` and `/codebase-audit`.
 3. **SARIF input is untrusted.** Phase 1E path validation and Phase 1F message sanitization are mandatory for SARIF-sourced findings. Skipping either is a security hole.
 4. **Option D preserves the canonical record.** Never silently filter findings out of plan generation based on `quick_fix_status`. Generate plans for everything; use templates to annotate already-applied groups.
 5. **AskUserQuestion fires in two places:** Phase 4 depth consent (unless `--thorough`) and Phase 7 plan menu. Nowhere else.

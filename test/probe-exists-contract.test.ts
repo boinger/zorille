@@ -168,8 +168,12 @@ describe("probe-exists.sh contract (lib/probe-exists.sh)", () => {
     expect(preamble).toContain("lib/probe-exists.sh");
 
     const phase12 = skillMd.match(/### 1\.2 [\s\S]*?(?=\n### )/)?.[0] ?? "";
+    // v1.9.2: Phase 1.2 invokes via $LIB_DIR (skill install dir), not
+    // $REPO_ROOT (audit target's git root). See v1.9.2 plan for the full
+    // bug story — the $REPO_ROOT form was silently failing for every
+    // audit target that wasn't codebase-audit itself.
     expect(phase12).toMatch(
-      /bash\s+["']?\$\{?REPO_ROOT\}?\/lib\/probe-exists\.sh/,
+      /bash\s+["']?\$\{?LIB_DIR\}?\/probe-exists\.sh/,
     );
   });
 });

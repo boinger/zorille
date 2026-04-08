@@ -1,6 +1,6 @@
 ---
 name: codebase-audit
-version: 1.9.1
+version: 1.9.2
 description: |
   Full codebase audit. Analyzes an entire project cold, no diff, no branch context,
   producing a structured report covering bugs, security issues, architectural problems,
@@ -32,21 +32,27 @@ to verify by running Y" is better than a confident wrong answer.
 ## Preamble (run first)
 
 ```bash
-# Shared helper scripts (invoke via: bash "$REPO_ROOT/lib/<script>.sh" <args>)
+# Shared helper scripts (invoke via: bash "$LIB_DIR/<script>.sh" <args>)
 #   lib/slug.sh         — canonical repo slug (used below for SLUG=)
 #   lib/probe-exists.sh — probe sentinel files for existence, always exits 0.
 #                         Use this INSTEAD OF `ls` for probing missing-file-safe.
 #                         See Key Rule 2d for why.
+LIB_DIR="${CODEBASE_AUDIT_LIB_DIR:-$HOME/.claude/skills/codebase-audit/lib}"
+[ -d "$LIB_DIR" ] || echo "WARNING: $LIB_DIR does not exist. Run ./setup from the codebase-audit repo (or set CODEBASE_AUDIT_LIB_DIR)." >&2
 _BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
 echo "BRANCH: $_BRANCH"
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
-SLUG=$(bash "$REPO_ROOT/lib/slug.sh" 2>/dev/null || basename "$REPO_ROOT")
+SLUG=$(bash "$LIB_DIR/slug.sh" 2>/dev/null || basename "$REPO_ROOT")
 echo "SLUG: $SLUG"
 AUDIT_HOME="${CODEBASE_AUDIT_HOME:-$HOME/.codebase-audits}"
 echo "AUDIT_HOME: $AUDIT_HOME"
 ```
 
-Both `lib/slug.sh` and `lib/probe-exists.sh` are load-bearing contracts shared with `/plan-fixes`. Both skills must compute the same slug for the same repo (slug contract) and use the same probe semantics for sentinel files (probe contract). Do not inline either derivation — always invoke the shared scripts so drift is impossible. If you're running this skill from a context where `lib/slug.sh` is unreachable (e.g., tests in a fixture repo), the fallback is the repo basename.
+Both `lib/slug.sh` and `lib/probe-exists.sh` are load-bearing contracts shared with `/plan-fixes`. Both skills must compute the same slug for the same repo (slug contract) and use the same probe semantics for sentinel files (probe contract). Do not inline either derivation — always invoke the shared scripts so drift is impossible.
+
+**Why `$LIB_DIR` and not `$REPO_ROOT`:** the shared scripts live in the skill's install directory (`~/.claude/skills/codebase-audit/lib/` after `./setup`), not in the audit target's git tree. `$REPO_ROOT` is the git root of wherever you invoke `/codebase-audit` — which for any real audit is NOT the codebase-audit repo itself. `$LIB_DIR` defaults to the standard install path and can be overridden with the `CODEBASE_AUDIT_LIB_DIR` env var for non-standard installs. The `[ -d "$LIB_DIR" ]` check at the top of the preamble warns if the directory doesn't exist (e.g., stale symlink after a deleted dev clone) so misconfiguration is diagnosable at first glance instead of surfacing as mysterious downstream failures.
+
+If `lib/slug.sh` is unreachable (script missing, stale symlink, or unusual install), the `|| basename "$REPO_ROOT"` fallback produces a basename-derived slug as a graceful degradation. `lib/probe-exists.sh` has NO bash-level fallback in later phases — if the script can't be found, phase probing fails loudly, because silent degradation is worse than visible failure for the probe use case.
 
 # /codebase-audit — Cold-Start Codebase Audit
 
@@ -148,7 +154,7 @@ echo "Audit storage: $AUDIT_HOME/$SLUG/audits/"
 ### 1.2 Language and framework detection
 
 ```bash
-bash "$REPO_ROOT/lib/probe-exists.sh" package.json Cargo.toml go.mod pyproject.toml Gemfile build.gradle pom.xml Makefile CMakeLists.txt composer.json mix.exs
+bash "$LIB_DIR/probe-exists.sh" package.json Cargo.toml go.mod pyproject.toml Gemfile build.gradle pom.xml Makefile CMakeLists.txt composer.json mix.exs
 # Glob matches (may expand to nothing) use find directly to keep the loop simple:
 find . -maxdepth 1 \( -name '*.csproj' -o -name '*.sln' \) 2>/dev/null
 ```
@@ -158,7 +164,7 @@ find . -maxdepth 1 \( -name '*.csproj' -o -name '*.sln' \) 2>/dev/null
 Also scan for infrastructure config files with the same script:
 
 ```bash
-bash "$REPO_ROOT/lib/probe-exists.sh" Dockerfile docker-compose.yml docker-compose.yaml nginx.conf
+bash "$LIB_DIR/probe-exists.sh" Dockerfile docker-compose.yml docker-compose.yaml nginx.conf
 find .github/workflows -maxdepth 1 \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null
 find . -maxdepth 3 \( -name '*.tf' -o -name '*.tfvars' \) -not -path '*/node_modules/*' -not -path '*/vendor/*' -not -path '*/.git/*' 2>/dev/null | head -5
 find . -maxdepth 3 \( -path '*/k8s/*.yaml' -o -path '*/k8s/*.yml' -o -path '*/deploy/*.yaml' -o -path '*/deploy/*.yml' -o -name 'Chart.yaml' \) -not -path '*/node_modules/*' -not -path '*/vendor/*' -not -path '*/.git/*' 2>/dev/null | head -5
@@ -1104,9 +1110,9 @@ Print:
    **2d. Every probe command MUST exit 0 — even when the target doesn't exist.** This matters because Claude Code batches Bash calls in parallel, and a single non-zero exit in the batch cascade-cancels its sibling tools. The user sees red "Cancelled" messages for work that had nothing wrong with it. The trap is `ls` — `ls /nonexistent 2>/dev/null` still exits 1 even though stderr is suppressed. Common fixes:
    - **Probing sentinel files** (does `Dockerfile` / `pyproject.toml` / `.github/workflows` exist?): **use `lib/probe-exists.sh`**, NEVER `ls` with a wall of paths:
      ```bash
-     bash "$REPO_ROOT/lib/probe-exists.sh" pyproject.toml Makefile Dockerfile .github/workflows
+     bash "$LIB_DIR/probe-exists.sh" pyproject.toml Makefile Dockerfile .github/workflows
      ```
-     The script is a load-bearing shared contract (see preamble). It always exits 0 and prints only files that actually exist, one per line. Clean output, no `|| true` gymnastics, no cascade-cancel risk. If you need to probe files and find yourself writing an `ls`, stop and use the script instead. `ls` is for listing directories you intend to read in full, not for probing existence.
+     The script is a load-bearing shared contract (see preamble). It always exits 0 and prints only files that actually exist, one per line. Clean output, no `|| true` gymnastics, no cascade-cancel risk. **`$LIB_DIR` is the skill's install directory**, defined in the preamble as `${CODEBASE_AUDIT_LIB_DIR:-$HOME/.claude/skills/codebase-audit/lib}`. Do NOT reference the script via `$REPO_ROOT/lib/` — `$REPO_ROOT` is the audit target, which almost never contains a `lib/probe-exists.sh`. If you need to probe files and find yourself writing an `ls`, stop and use the script instead. `ls` is for listing directories you intend to read in full, not for probing existence.
    - **If you really need `ls`** for something other than probing (e.g., listing the contents of a directory you know exists), append `|| true`: `ls -la foo.txt 2>/dev/null || true`.
    - **`find`** already exits 0 when nothing matches — use `find` in preference to `ls` when enumerating files by pattern.
    - **`grep`** exits 1 when nothing matches — append `|| true` when using grep in a pipeline whose failure would cascade.
