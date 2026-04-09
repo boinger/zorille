@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Fixes
+
+- **`./setup` no longer creates stray self-symlinks on re-run.** `setup:48` and
+  `action.yml:111` both used `ln -sf SRC DST`. When DST already exists as a
+  symlink to a directory (true on every run after the first), both BSD and GNU
+  `ln` follow the symlink and create a new link INSIDE the target directory,
+  named `basename(SRC)`. That's why repeat runs of `./setup` were leaving
+  `plan-fixes/plan-fixes` and `<repo-basename>/<repo-basename>` strays in the
+  working tree. Replaced with `ln -sfn` at both call sites — the `-n` flag
+  tells `ln` not to dereference a symlink-to-directory destination. Adds
+  `test/setup-symlink.test.ts` regression test that runs `./setup` twice in
+  an isolated `HOME` and asserts both the absence of strays and the presence
+  of the correct install symlinks. The prior fix (`669c92e`) removed only the
+  symptom file, which is why the bug came back — this test codifies the
+  invariant.
+
 ### Changed
 
 - Renamed repo `codebase-audit` → `zorille`. The `/codebase-audit` slash command

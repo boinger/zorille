@@ -45,7 +45,7 @@ for skill in "${SKILLS[@]}"; do
     exit 1
   fi
 
-  ln -sf "$SOURCE_SKILL_DIR" "$SKILL_DIR"
+  ln -sfn "$SOURCE_SKILL_DIR" "$SKILL_DIR"
   echo "  ✓ /$skill → $SOURCE_SKILL_DIR"
 done
 

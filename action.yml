@@ -108,7 +108,7 @@ runs:
       shell: bash
       run: |
         mkdir -p ~/.claude/skills
-        ln -sf "${{ github.action_path }}" ~/.claude/skills/codebase-audit
+        ln -sfn "${{ github.action_path }}" ~/.claude/skills/codebase-audit
         echo "Skill installed: $(ls -la ~/.claude/skills/codebase-audit/SKILL.md 2>/dev/null && echo 'OK' || echo 'MISSING')"
 
     - name: Smoke check
