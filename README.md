@@ -1,35 +1,23 @@
 # zorille
 
-Two related [Claude Code](https://claude.ai/code) skills for deep codebase work:
+Two Claude Code skills for finding bugs and turning them into PR-sized fix plans.
 
-- **`/codebase-audit`** — cold-start audit. Finds bugs, security issues, architectural problems, tech debt, test gaps. Writes a structured report and `baseline.json` for regression tracking. Read-only by default.
-- **`/plan-fixes`** — turns findings into PR-sized fix plans with depth-aware investigation (callers, tests, context). Reads `/codebase-audit`'s `baseline.json` *or* any SARIF 2.1.0 source (CodeQL, ESLint, Semgrep, Sonar, GitHub Code Scanning).
+## Two skills, one repo
 
-## Hello world
+- **`/codebase-audit`** finds problems. Cold-start audit of any codebase: bugs, security issues, architectural problems, tech debt, test gaps. Writes a structured report and a `baseline.json` for regression tracking. Read-only by default; opt in to mechanical fixes with `--quick-fix`.
+- **`/plan-fixes`** turns problems into fix plans. Reads the baseline `/codebase-audit` writes — or any SARIF 2.1.0 source (CodeQL, ESLint, Semgrep, Sonar, GitHub Code Scanning). Groups findings into PR-sized plans with depth-aware investigation: callers, tests, and adjacent context.
 
-```bash
-git clone https://github.com/boinger/zorille ~/Projects/zorille
-cd ~/Projects/zorille
-./setup
-```
+The repo is named `zorille` for historical reasons; the slash commands are still `/codebase-audit` and `/plan-fixes`.
 
-Then in Claude Code:
+## What this solves
 
-```
-# Audit + plan in one step
-/codebase-audit --plan-fixes
+You inherited a codebase you don't know. You need to know what's in there before you start changing it — what's broken, what's risky, what's tech debt, what's a security problem. `/codebase-audit` reads the code cold and produces a structured report you can act on. Run it again later and it tells you what's fixed, what's new, and where the score moved.
 
-# Or run them separately (audit first, plan later)
-/codebase-audit
-/plan-fixes
-
-# Or plan from any SARIF source (no /codebase-audit run required)
-/plan-fixes --from path/to/results.sarif
-```
+`/plan-fixes` is the bridge from "I have a list of findings" to "I have a PR-sized plan I can hand to a coding agent." It works against `/codebase-audit`'s output, but it also reads SARIF from any external scanner — so existing CodeQL or Semgrep results can become reviewable fix plans without re-scanning.
 
 ## What a fix plan looks like
 
-`/plan-fixes` compresses findings into reviewable, PR-sized plans:
+`/plan-fixes` compresses raw findings into reviewable, PR-sized plans:
 
 ```
 Compressed 217 CodeQL findings into 14 reviewable plans (avg 15.5 findings per plan).
@@ -38,7 +26,17 @@ Compressed 217 CodeQL findings into 14 reviewable plans (avg 15.5 findings per p
   Sources: codeql: 217 findings
 ```
 
-Each plan is a markdown file with Context, Findings table, per-finding Approach (including caller analysis, test coverage gaps, and contextual notes), Files to Modify, Risk assessment, Verify & Rollback steps, and cross-plan Dependencies.
+Each plan is a markdown file with Context, a Findings table, per-finding Approach (caller analysis, test coverage gaps, contextual notes), Files to Modify, Risk assessment, Verify & Rollback steps, and cross-plan Dependencies.
+
+## Install
+
+```bash
+git clone https://github.com/boinger/zorille ~/Projects/zorille
+cd ~/Projects/zorille
+./setup
+```
+
+After `./setup`, both `/codebase-audit` and `/plan-fixes` are available as slash commands in Claude Code. The setup script is idempotent — re-run it to upgrade.
 
 ## Usage
 
@@ -56,146 +54,37 @@ Each plan is a markdown file with Context, Findings table, per-finding Approach 
 /plan-fixes --show-applied                Expand already-applied plans in the menu
 ```
 
-## Modes
+Audit modes: **Full** (default — all 4 phases, full report). **Quick** (`--quick` — phase 1 only + top 10 patterns, ~2 min). **Regression** (automatic — diffs against the previous baseline if one exists). **Suggest fixes** (`--suggest-fixes` — adds inline diffs to each finding). **Quick fix** (`--quick-fix` — auto-applies high-confidence mechanical fixes).
 
-- **Full** (default): All 4 phases. Health score, architecture diagram, findings by severity, fix plan.
-- **Quick** (`--quick`): Phase 1 only + top 10 checklist patterns. Project profile, health score, top 5 findings. Under 2 minutes.
-- **Regression** (automatic): If a previous baseline exists, diffs against it. Shows what's fixed, what's new, score delta.
-- **Suggest Fixes** (`--suggest-fixes`): Adds a unified diff to each finding where a mechanical fix is possible. Diffs are tagged `[HIGH CONFIDENCE]` or `[REVIEW SUGGESTED]`.
+## Configuration
 
-## Custom Checklists
-
-Drop a `.codebase-audit/checklist.md` in your project root to add project-specific audit patterns. These run after the built-in patterns. Use the same format as the built-in `checklist.md`.
-
-## Storage
-
-Audit reports and regression baselines are saved to `~/.codebase-audits/<project>/audits/`.
-
-To change the storage location, set the `CODEBASE_AUDIT_HOME` environment variable:
+**Audit storage.** Reports and baselines are saved to `~/.codebase-audits/<project>/audits/`. Override the location with `CODEBASE_AUDIT_HOME`:
 
 ```bash
 export CODEBASE_AUDIT_HOME="$HOME/.local/share/codebase-audits"
 ```
 
-## Upgrade
+**Custom checklist patterns.** Drop a `.codebase-audit/checklist.md` in your project root to add project-specific audit rules. Custom patterns run after the built-in ones, in the same format as the built-in `checklist.md` in this repo.
 
-```bash
-cd ~/.claude/skills/codebase-audit && git pull
+## Use in CI
+
+zorille is also a published GitHub Action. The simplest case:
+
+```yaml
+- uses: boinger/zorille@v1
+  with:
+    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-Or if you used the setup script:
+For SARIF output (fed to GitHub Code Scanning), baseline-first onboarding for legacy codebases, PR-scoped checks via `changed-only`, and the full inputs/outputs reference, see [CI.md](CI.md).
+
+## Upgrade
 
 ```bash
 cd ~/Projects/zorille && ./setup
 ```
 
-## CI / GitHub Action
-
-Run codebase audits automatically in CI with one line:
-
-```yaml
-- uses: boinger/zorille@v1
-  with:
-    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-```
-
-### SARIF + GitHub Code Scanning
-
-Findings appear inline on PRs in GitHub's Security tab:
-
-```yaml
-permissions:
-  security-events: write
-  contents: read
-
-steps:
-  - uses: actions/checkout@v4
-  - uses: boinger/zorille@v1
-    with:
-      anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-      format: sarif
-      fail-on: important
-```
-
-### CI Onboarding (baseline first run)
-
-Establish a baseline without failing CI, then gate on regressions:
-
-```yaml
-# Day 1: establish baseline
-- uses: boinger/zorille@v1
-  with:
-    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-    baseline-only: true
-
-# Day 2+: fail only on new findings
-- uses: boinger/zorille@v1
-  with:
-    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-    fail-on-new: true
-```
-
-### PR-scoped check
-
-Audit only changed files, fail on new findings:
-
-```yaml
-on:
-  pull_request:
-
-jobs:
-  audit:
-    # Skip for fork PRs (no access to secrets)
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # needed for changed-only merge base
-      - uses: boinger/zorille@v1
-        with:
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-          changed-only: true
-          fail-on-new: true
-```
-
-### Notes
-
-- **Platform**: Requires `ubuntu-latest` runner
-- **Cost**: Max plan users have no incremental cost. API key users: ~$2-10 per full audit; use `changed-only: true` for PR checks to reduce usage
-- **Data**: Code context is sent to the Anthropic API for analysis
-- **Baselines**: Persisted via `actions/cache`, subject to 7-day eviction on inactive repos. Set `cache-baseline: false` to disable
-- **Permissions**: `security-events: write` required for SARIF upload to GitHub Code Scanning
-- **`fetch-depth: 0`**: Required when using `changed-only: true` so git can compute the merge base
-- **Fork PRs**: Forked PRs cannot access repository secrets. Guard with `if: github.event.pull_request.head.repo.full_name == github.repository`
-
-### All Inputs
-
-| Input | Default | Description |
-|-------|---------|-------------|
-| `anthropic-api-key` | (required) | Anthropic API key |
-| `fail-on` | `critical` | Threshold: `critical` or `important` |
-| `format` | `json` | Output: `json` or `sarif` |
-| `changed-only` | `false` | Scope to changed files |
-| `baseline-only` | `false` | Establish baseline, always pass |
-| `fail-on-new` | `false` | Fail only on new findings |
-| `fail-on-regression` | `false` | Fail if score regressed |
-| `min-severity` | | Filter: `critical`, `important`, `notable` |
-| `no-infra` | `false` | Skip infrastructure scanning |
-| `upload-sarif` | `true` | Auto-upload SARIF |
-| `sarif-category` | `codebase-audit` | SARIF upload category |
-| `cache-baseline` | `true` | Persist baselines across runs |
-| `claude-code-version` | `latest` | Pin Claude Code CLI version |
-| `extra-flags` | | Additional flags for /codebase-audit |
-
-### Outputs
-
-| Output | Description |
-|--------|-------------|
-| `status` | `pass` or `fail` |
-| `health-score` | 0-100 |
-| `findings-count` | Number of findings |
-| `sarif-file` | Path to SARIF file (when format=sarif) |
+Idempotent — works for fresh installs and upgrades.
 
 ## License
 

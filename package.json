@@ -1,7 +1,7 @@
 {
   "name": "zorille",
   "version": "1.0.0",
-  "description": "Cold-start codebase audit skill for Claude Code",
+  "description": "Two Claude Code skills: codebase-audit (find issues in any codebase) + plan-fixes (turn issues into PR-sized plans, supports SARIF input from CodeQL/Semgrep/etc.)",
   "scripts": {
     "test": "bun test",
     "test:evals": "EVALS=1 bun test test/e2e.test.ts"
