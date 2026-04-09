@@ -1,4 +1,4 @@
-# codebase-audit
+# zorille
 
 Two related [Claude Code](https://claude.ai/code) skills for deep codebase work:
 
@@ -8,8 +8,8 @@ Two related [Claude Code](https://claude.ai/code) skills for deep codebase work:
 ## Hello world
 
 ```bash
-git clone https://github.com/boinger/codebase-audit ~/Projects/codebase-audit
-cd ~/Projects/codebase-audit
+git clone https://github.com/boinger/zorille ~/Projects/zorille
+cd ~/Projects/zorille
 ./setup
 ```
 
@@ -86,7 +86,7 @@ cd ~/.claude/skills/codebase-audit && git pull
 Or if you used the setup script:
 
 ```bash
-cd ~/Projects/codebase-audit && ./setup
+cd ~/Projects/zorille && ./setup
 ```
 
 ## CI / GitHub Action
@@ -94,7 +94,7 @@ cd ~/Projects/codebase-audit && ./setup
 Run codebase audits automatically in CI with one line:
 
 ```yaml
-- uses: boinger/codebase-audit@v1
+- uses: boinger/zorille@v1
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -110,7 +110,7 @@ permissions:
 
 steps:
   - uses: actions/checkout@v4
-  - uses: boinger/codebase-audit@v1
+  - uses: boinger/zorille@v1
     with:
       anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
       format: sarif
@@ -123,13 +123,13 @@ Establish a baseline without failing CI, then gate on regressions:
 
 ```yaml
 # Day 1: establish baseline
-- uses: boinger/codebase-audit@v1
+- uses: boinger/zorille@v1
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
     baseline-only: true
 
 # Day 2+: fail only on new findings
-- uses: boinger/codebase-audit@v1
+- uses: boinger/zorille@v1
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
     fail-on-new: true
@@ -152,7 +152,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0  # needed for changed-only merge base
-      - uses: boinger/codebase-audit@v1
+      - uses: boinger/zorille@v1
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           changed-only: true

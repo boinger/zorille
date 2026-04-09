@@ -1,5 +1,5 @@
 {
-  "name": "codebase-audit",
+  "name": "zorille",
   "version": "1.0.0",
   "description": "Cold-start codebase audit skill for Claude Code",
   "scripts": {

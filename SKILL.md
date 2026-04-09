@@ -802,7 +802,7 @@ Construct a SARIF 2.1.0 document. Follow this structure exactly:
         "driver": {
           "name": "codebase-audit",
           "semanticVersion": "{tool_version}",
-          "informationUri": "https://github.com/boinger/codebase-audit",
+          "informationUri": "https://github.com/boinger/zorille",
           "rules": [
             {
               "id": "{category}/{kebab-title}",

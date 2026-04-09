@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Renamed repo `codebase-audit` → `zorille`. The `/codebase-audit` slash command
+  itself is **unchanged** — its name, install path, env vars, and baseline home
+  (`~/.codebase-audits/`) all remain the same. Only the GitHub repo, local clone
+  directory, package.json name, and README title change. Solo-dev project, no
+  known downstream consumers — the rename is a cosmetic reorganization of the
+  container brand, not a behavioral change. If any downstream consumers exist,
+  GitHub will redirect the old URL automatically; explicit
+  `git remote set-url origin git@github.com:boinger/zorille.git` is the safer
+  update.
+- Self-audit baseline seam: `lib/slug.sh` now derives `boinger-zorille` for
+  self-audits instead of `boinger-codebase-audit`. Old baselines at
+  `~/.codebase-audits/codebase-audit/` are orphaned — they remain readable but
+  new runs write to `~/.codebase-audits/boinger-zorille/`. Same seam as the
+  v1.9.2 rename-free baseline notes; no backfill.
+
 ## [1.9.2] - 2026-04-08
 
 ### Fixes
@@ -110,7 +129,7 @@ Auditing and planning are conceptually independent operations. v1.8.0 wedged pla
 
 ### Features
 
-- **GitHub Action** (`uses: boinger/codebase-audit@v1`): One-line CI integration. Composite action wraps Claude Code skill invocation with:
+- **GitHub Action** (`uses: boinger/zorille@v1`): One-line CI integration. Composite action wraps Claude Code skill invocation with:
   - All CI flags exposed as action inputs (fail-on, format, changed-only, baseline-only, fail-on-new, etc.)
   - File-based output parsing (reads from `$AUDIT_HOME`, not stdout) for reliability
   - Automatic SARIF upload to GitHub Code Scanning when `format: sarif`
