@@ -82,27 +82,62 @@ runs:
   steps:
     - name: Verify API key
       shell: bash
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
       run: |
-        if [ -z "${{ inputs.anthropic-api-key }}" ]; then
+        if [ -z "$ANTHROPIC_API_KEY" ]; then
           echo "::error::ANTHROPIC_API_KEY is not set. Add it as a repository secret: Settings > Secrets > Actions > New repository secret."
           exit 1
         fi
 
+    - name: Validate inputs
+      shell: bash
+      env:
+        FAIL_ON: ${{ inputs.fail-on }}
+        FORMAT: ${{ inputs.format }}
+        MIN_SEVERITY: ${{ inputs.min-severity }}
+      run: |
+        case "$FAIL_ON" in
+          critical|important) ;;
+          *) echo "::error::fail-on must be 'critical' or 'important', got '$FAIL_ON'"; exit 1 ;;
+        esac
+        case "$FORMAT" in
+          json|sarif) ;;
+          *) echo "::error::format must be 'json' or 'sarif', got '$FORMAT'"; exit 1 ;;
+        esac
+        if [ -n "$MIN_SEVERITY" ]; then
+          case "$MIN_SEVERITY" in
+            critical|important|notable) ;;
+            *) echo "::error::min-severity must be 'critical', 'important', or 'notable', got '$MIN_SEVERITY'"; exit 1 ;;
+          esac
+        fi
+
     - name: Restore baseline cache
       if: inputs.cache-baseline == 'true'
-      uses: actions/cache@v4
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
       with:
         path: ${{ runner.temp }}/codebase-audits
         key: codebase-audit-baseline-${{ github.repository }}
 
     - name: Install Claude Code CLI
       shell: bash
+      env:
+        CLAUDE_CODE_VERSION: ${{ inputs.claude-code-version }}
       run: |
-        if [ "${{ inputs.claude-code-version }}" = "latest" ]; then
-          npm install -g @anthropic-ai/claude-code
-        else
-          npm install -g @anthropic-ai/claude-code@${{ inputs.claude-code-version }}
-        fi
+        # Validate version format: 'latest' or semver-shaped (digits and dots).
+        # Anything else is an injection attempt or a typo — fail loudly.
+        case "$CLAUDE_CODE_VERSION" in
+          latest)
+            npm install -g @anthropic-ai/claude-code
+            ;;
+          [0-9]*.[0-9]*.[0-9]*|[0-9]*.[0-9]*.[0-9]*-*)
+            npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
+            ;;
+          *)
+            echo "::error::claude-code-version must be 'latest' or a semver string (e.g. '1.2.3'), got '$CLAUDE_CODE_VERSION'"
+            exit 1
+            ;;
+        esac
 
     - name: Install codebase-audit skill
       shell: bash
@@ -125,34 +160,30 @@ runs:
     - name: Build audit command
       id: build-cmd
       shell: bash
+      env:
+        FAIL_ON: ${{ inputs.fail-on }}
+        FORMAT: ${{ inputs.format }}
+        CHANGED_ONLY: ${{ inputs.changed-only }}
+        BASELINE_ONLY: ${{ inputs.baseline-only }}
+        FAIL_ON_NEW: ${{ inputs.fail-on-new }}
+        FAIL_ON_REGRESSION: ${{ inputs.fail-on-regression }}
+        MIN_SEVERITY: ${{ inputs.min-severity }}
+        NO_INFRA: ${{ inputs.no-infra }}
+        EXTRA_FLAGS: ${{ inputs.extra-flags }}
       run: |
-        CMD="/codebase-audit --ci"
-        CMD="$CMD --fail-on ${{ inputs.fail-on }}"
+        # All inputs are bound to env vars above. Bash expansion is safe;
+        # ${{ inputs.X }} interpolation in a run: block is not (script
+        # injection). Do not interpolate inputs directly into this script.
+        CMD="/codebase-audit --ci --fail-on $FAIL_ON"
 
-        if [ "${{ inputs.format }}" = "sarif" ]; then
-          CMD="$CMD --format sarif"
-        fi
-        if [ "${{ inputs.changed-only }}" = "true" ]; then
-          CMD="$CMD --changed-only"
-        fi
-        if [ "${{ inputs.baseline-only }}" = "true" ]; then
-          CMD="$CMD --baseline-only"
-        fi
-        if [ "${{ inputs.fail-on-new }}" = "true" ]; then
-          CMD="$CMD --fail-on-new"
-        fi
-        if [ "${{ inputs.fail-on-regression }}" = "true" ]; then
-          CMD="$CMD --fail-on-regression"
-        fi
-        if [ -n "${{ inputs.min-severity }}" ]; then
-          CMD="$CMD --min-severity ${{ inputs.min-severity }}"
-        fi
-        if [ "${{ inputs.no-infra }}" = "true" ]; then
-          CMD="$CMD --no-infra"
-        fi
-        if [ -n "${{ inputs.extra-flags }}" ]; then
-          CMD="$CMD ${{ inputs.extra-flags }}"
-        fi
+        [ "$FORMAT" = "sarif" ] && CMD="$CMD --format sarif"
+        [ "$CHANGED_ONLY" = "true" ] && CMD="$CMD --changed-only"
+        [ "$BASELINE_ONLY" = "true" ] && CMD="$CMD --baseline-only"
+        [ "$FAIL_ON_NEW" = "true" ] && CMD="$CMD --fail-on-new"
+        [ "$FAIL_ON_REGRESSION" = "true" ] && CMD="$CMD --fail-on-regression"
+        [ -n "$MIN_SEVERITY" ] && CMD="$CMD --min-severity $MIN_SEVERITY"
+        [ "$NO_INFRA" = "true" ] && CMD="$CMD --no-infra"
+        [ -n "$EXTRA_FLAGS" ] && CMD="$CMD $EXTRA_FLAGS"
 
         echo "cmd=$CMD" >> "$GITHUB_OUTPUT"
         echo "Audit command: $CMD"
@@ -163,6 +194,7 @@ runs:
       env:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
         CODEBASE_AUDIT_HOME: ${{ runner.temp }}/codebase-audits/${{ github.run_id }}
+        AUDIT_CMD: ${{ steps.build-cmd.outputs.cmd }}
       run: |
         mkdir -p "$CODEBASE_AUDIT_HOME"
         echo "audit_home=$CODEBASE_AUDIT_HOME" >> "$GITHUB_OUTPUT"
@@ -170,64 +202,77 @@ runs:
         OUTPUT_FILE=$(mktemp)
         echo "output_file=$OUTPUT_FILE" >> "$GITHUB_OUTPUT"
 
-        # claude --print always exits 0; we parse status from output files
+        # Capture the exit code explicitly. claude --print is documented to
+        # always exit 0 when an audit completes (we parse status from output
+        # files), but we no longer rely on that behavior — if it ever exits
+        # non-zero, the parse step needs the signal to distinguish "broken
+        # invocation" from "clean audit, no findings".
+        set +e
         claude --print --no-session-persistence --bare --permission-mode bypassPermissions \
-          "${{ steps.build-cmd.outputs.cmd }}" > "$OUTPUT_FILE" 2>&1 || true
+          "$AUDIT_CMD" > "$OUTPUT_FILE" 2>&1
+        CLAUDE_EXIT=$?
+        set -e
+        echo "claude_exit=$CLAUDE_EXIT" >> "$GITHUB_OUTPUT"
 
     - name: Parse results
       id: parse
       shell: bash
       env:
         CODEBASE_AUDIT_HOME: ${{ steps.audit.outputs.audit_home }}
+        OUTPUT_FILE: ${{ steps.audit.outputs.output_file }}
+        CLAUDE_EXIT: ${{ steps.audit.outputs.claude_exit }}
+        FORMAT: ${{ inputs.format }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        BASELINE_ONLY: ${{ inputs.baseline-only }}
+        SARIF_OUT_PATH: ${{ runner.temp }}/codebase-audit-results.sarif
       run: |
-        OUTPUT_FILE="${{ steps.audit.outputs.output_file }}"
-
-        # Primary strategy: read from output files written by the skill
-        if [ "${{ inputs.format }}" = "sarif" ]; then
+        # Locate the structured output file the skill writes.
+        if [ "$FORMAT" = "sarif" ]; then
           RESULT_FILE=$(find "$CODEBASE_AUDIT_HOME" -name "*-results.sarif" -type f 2>/dev/null | sort | tail -1)
         else
           RESULT_FILE=$(find "$CODEBASE_AUDIT_HOME" -name "*-ci-output.json" -type f 2>/dev/null | sort | tail -1)
         fi
 
+        # Refuse to fail open. If no result file exists, the audit did not
+        # complete — surface that as an error rather than defaulting to pass.
         if [ -z "$RESULT_FILE" ] || [ ! -f "$RESULT_FILE" ]; then
-          echo "::warning::File-based output not found. Falling back to stdout parsing."
+          echo "::error::Audit did not produce a result file in $CODEBASE_AUDIT_HOME (claude exited $CLAUDE_EXIT). Output:"
+          cat "$OUTPUT_FILE" || true
           echo "Audit home contents:"
           find "$CODEBASE_AUDIT_HOME" -type f 2>/dev/null || echo "  (empty)"
-          RESULT_FILE="$OUTPUT_FILE"
+          exit 1
         fi
 
-        if [ "${{ inputs.format }}" = "sarif" ]; then
-          # SARIF output
-          SARIF_FILE="${{ runner.temp }}/codebase-audit-results.sarif"
-          cp "$RESULT_FILE" "$SARIF_FILE" 2>/dev/null || true
-          echo "sarif_file=$SARIF_FILE" >> "$GITHUB_OUTPUT"
+        if [ "$FORMAT" = "sarif" ]; then
+          cp "$RESULT_FILE" "$SARIF_OUT_PATH"
+          echo "sarif_file=$SARIF_OUT_PATH" >> "$GITHUB_OUTPUT"
 
-          ERROR_COUNT=$(jq '[.runs[0].results[] | select(.level == "error")] | length' "$RESULT_FILE" 2>/dev/null || echo "0")
-          WARNING_COUNT=$(jq '[.runs[0].results[] | select(.level == "warning")] | length' "$RESULT_FILE" 2>/dev/null || echo "0")
-          TOTAL_RESULTS=$(jq '.runs[0].results | length' "$RESULT_FILE" 2>/dev/null || echo "0")
+          ERROR_COUNT=$(jq '[.runs[0].results[] | select(.level == "error")] | length' "$RESULT_FILE")
+          WARNING_COUNT=$(jq '[.runs[0].results[] | select(.level == "warning")] | length' "$RESULT_FILE")
+          TOTAL_RESULTS=$(jq '.runs[0].results | length' "$RESULT_FILE")
 
           echo "findings_count=$TOTAL_RESULTS" >> "$GITHUB_OUTPUT"
           echo "health_score=" >> "$GITHUB_OUTPUT"
 
-          if [ "${{ inputs.fail-on }}" = "important" ]; then
+          if [ "$FAIL_ON" = "important" ]; then
             ABOVE_THRESHOLD=$((ERROR_COUNT + WARNING_COUNT))
           else
             ABOVE_THRESHOLD=$ERROR_COUNT
           fi
 
-          if [ "${{ inputs.baseline-only }}" = "true" ] || [ "$ABOVE_THRESHOLD" -eq 0 ]; then
+          if [ "$BASELINE_ONLY" = "true" ] || [ "$ABOVE_THRESHOLD" -eq 0 ]; then
             echo "status=pass" >> "$GITHUB_OUTPUT"
           else
             echo "status=fail" >> "$GITHUB_OUTPUT"
           fi
         else
-          # JSON output
-          STATUS=$(jq -r '.status // "pass"' "$RESULT_FILE" 2>/dev/null || echo "pass")
-          HEALTH_SCORE=$(jq -r '.health_score // ""' "$RESULT_FILE" 2>/dev/null || echo "")
-          FINDINGS_COUNT=$(jq -r '.findings_count // "0"' "$RESULT_FILE" 2>/dev/null || echo "0")
+          # JSON output. No '// "pass"' fallbacks — if jq cannot read the
+          # required fields, the file is malformed and we want a hard error.
+          STATUS=$(jq -r '.status' "$RESULT_FILE")
+          HEALTH_SCORE=$(jq -r '.health_score // ""' "$RESULT_FILE")
+          FINDINGS_COUNT=$(jq -r '.findings_count // 0' "$RESULT_FILE")
 
-          # Override status for baseline-only mode
-          if [ "${{ inputs.baseline-only }}" = "true" ]; then
+          if [ "$BASELINE_ONLY" = "true" ]; then
             STATUS="pass"
           fi
 
@@ -237,11 +282,11 @@ runs:
           echo "sarif_file=" >> "$GITHUB_OUTPUT"
         fi
 
-        echo "Audit status: $(cat "$GITHUB_OUTPUT" | grep '^status=' | cut -d= -f2)"
+        echo "Audit status: $(grep '^status=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2)"
 
     - name: Upload SARIF to GitHub Code Scanning
       if: inputs.format == 'sarif' && inputs.upload-sarif == 'true' && steps.parse.outputs.sarif_file != ''
-      uses: github/codeql-action/upload-sarif@v3
+      uses: github/codeql-action/upload-sarif@3b1a19a80ab047f35cbb237b5bd9bdc1e14f166c  # v3.35.1
       with:
         sarif_file: ${{ steps.parse.outputs.sarif_file }}
         category: ${{ inputs.sarif-category }}
@@ -249,10 +294,15 @@ runs:
 
     - name: Set exit code
       shell: bash
+      env:
+        STATUS: ${{ steps.parse.outputs.status }}
+        HEALTH_SCORE: ${{ steps.parse.outputs.health_score }}
+        FINDINGS_COUNT: ${{ steps.parse.outputs.findings_count }}
+        FAIL_ON: ${{ inputs.fail-on }}
       run: |
-        if [ "${{ steps.parse.outputs.status }}" = "fail" ]; then
-          echo "::error::Codebase audit failed. Found findings above '${{ inputs.fail-on }}' threshold. Health score: ${{ steps.parse.outputs.health_score }}"
+        if [ "$STATUS" = "fail" ]; then
+          echo "::error::Codebase audit failed. Found findings above '$FAIL_ON' threshold. Health score: $HEALTH_SCORE"
           exit 1
         else
-          echo "Codebase audit passed. Health score: ${{ steps.parse.outputs.health_score }}. Findings: ${{ steps.parse.outputs.findings_count }}"
+          echo "Codebase audit passed. Health score: $HEALTH_SCORE. Findings: $FINDINGS_COUNT"
         fi
