@@ -8,7 +8,7 @@ Three Claude Code skills for finding what's wrong in a codebase and fixing it: b
 - **`/plan-fixes`** turns problems into fix plans. Reads the baseline `/codebase-audit` writes — or any SARIF 2.1.0 source (CodeQL, ESLint, Semgrep, Sonar, GitHub Code Scanning). Groups findings into PR-sized plans with depth-aware investigation: callers, tests, and adjacent context.
 - **`/deps`** handles dependency hygiene. Audit, update, and CVE remediation across Go, Python, Swift, Dart/Flutter, C#/.NET, and Node.js. Risk-tiered updates (critical → security → patch → minor) with test verification; never auto-bumps majors without approval. Standalone — doesn't depend on the audit/plan-fixes flow.
 
-The repo is named `zorille` for historical reasons; the slash commands are `/codebase-audit`, `/plan-fixes`, and `/deps`.
+The slash commands are `/codebase-audit`, `/plan-fixes`, and `/deps` regardless of where you cloned the repo. (For the story behind the repo name, see the bottom of this file.)
 
 ## What this solves
 
@@ -92,6 +92,14 @@ cd ~/Projects/zorille && ./setup
 ```
 
 Idempotent — works for fresh installs and upgrades.
+
+## About the repo name
+
+`zorille` is the alternate French spelling of *zorilla* — the African striped polecat (*Ictonyx striatus*), a small carnivore in family Mustelidae. The mustelids are stoats, martens, weasels, polecats, otters, badgers, ferrets: curious, smart little animals.
+
+I felt like being named after a mustelid fit the work — small, sharp-nosed creatures that find things hidden under rocks, which is roughly what `/codebase-audit`, `/plan-fixes`, and `/deps` do for a codebase you don't yet know. And I picked "zorille" specifically (not the more common English "zorilla") because there weren't any other projects named that.
+
+A literal name like `code-tools` or `audit-suite` would have been boring. The skills inside have those descriptive names because that's what skills need; the repo gets to have personality.
 
 ## License
 
