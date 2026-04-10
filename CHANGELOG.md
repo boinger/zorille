@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## [1.10.0] - 2026-04-09
+
+### Added
+
+- **`/deps` skill** for dependency audit, update, and CVE remediation across
+  Go, Python, Swift, Dart/Flutter, C#/.NET, and Node.js. Risk-tiered updates
+  (critical → security → patch → minor) with test verification; never auto-
+  bumps majors without explicit approval. Subcommands: `audit` (default —
+  scan for outdated deps and CVEs), `update`, `cve`, `triage`. Originally
+  lived as a personal slash command at `~/.claude/commands/deps.md`;
+  consolidated into zorille so the codebase-hygiene toolkit lives in one
+  repo. Pure-markdown skill with no `lib/` integration, no internal tests
+  beyond `test/deps-validation.test.ts` for frontmatter typo protection,
+  and no `deps/VERSION` file (the prompt has no release cadence). Tagline,
+  README, `package.json` description, GitHub repo description, and the
+  setup banner all updated from "two skills" to "three skills" framing.
+
 ### Fixes
 
 - **`./setup` no longer creates stray self-symlinks on re-run.** `setup:48` and
@@ -17,6 +34,19 @@
   of the correct install symlinks. The prior fix (`669c92e`) removed only the
   symptom file, which is why the bug came back — this test codifies the
   invariant.
+- **`action.yml` hardened against script injection and fail-open.** Every
+  `${{ inputs.X }}` reference inside a `run:` block was template-substituted
+  before bash saw the script, making shell quoting impossible. Refactored
+  every affected step to bind inputs to env vars and reference them as bash
+  variables (the canonical fix per GitHub's own security hardening guide).
+  Added a `Validate inputs` step that case-checks `fail-on`, `format`, and
+  `min-severity` at the action boundary. Replaced the `|| true` fail-open in
+  the audit step with explicit exit code capture; removed the `// "pass"` jq
+  fallbacks in the parse step that previously made a missing result file
+  silently report as a clean audit. Pinned `actions/cache@v4` →
+  `0057852b...` (v4.3.0), `github/codeql-action/upload-sarif@v3` →
+  `3b1a19a8...` (v3.35.1), and three `actions/checkout@v4` references in
+  `self-test.yml` → `34e11487...` (v4.3.1) to commit SHAs.
 
 ### Changed
 
@@ -34,6 +64,13 @@
   `~/.codebase-audits/codebase-audit/` are orphaned — they remain readable but
   new runs write to `~/.codebase-audits/boinger-zorille/`. Same seam as the
   v1.9.2 rename-free baseline notes; no backfill.
+- README refactored: cut from ~200 lines to ~95, single-audience narrative
+  (what / why / install / use / configure / one-paragraph CI pointer / upgrade
+  / license). CI / GitHub Action material extracted to a new `CI.md` covering
+  the quick start, SARIF + Code Scanning, baseline onboarding, PR-scoped
+  check, notes, and full inputs/outputs reference. `package.json` and the
+  GitHub repo description were updated alongside the README to reflect both
+  skills (and now three skills, after the `/deps` addition above).
 
 ## [1.9.2] - 2026-04-08
 

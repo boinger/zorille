@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
-SKILLS=("codebase-audit" "plan-fixes")
+SKILLS=("codebase-audit" "plan-fixes" "deps")
 
 # If codebase-audit is already installed and pointing here, treat this as
 # an upgrade: git pull, then FALL THROUGH to the per-skill install loop.
@@ -54,9 +54,10 @@ PF_VERSION=$(cat "$SOURCE_DIR/plan-fixes/VERSION" 2>/dev/null || echo "?")
 
 cat <<BANNER
 
-Installed two related Claude Code skills:
+Installed Claude Code skills:
   /codebase-audit v${CBA_VERSION}  — finds issues (audit + baseline)
   /plan-fixes     v${PF_VERSION}   — turns findings into fix plans
+  /deps                    — dependency audit + remediation
 
 Audit reports saved to ~/.codebase-audits/ on first run.
 Set CODEBASE_AUDIT_HOME to change this location.
@@ -70,4 +71,7 @@ Usage:
   /plan-fixes --show-applied                Expand already-applied plans in menu
   /plan-fixes --from results.sarif          Plan fixes from any SARIF 2.1.0 source
                                             (CodeQL, ESLint, Semgrep, Sonar, etc.)
+  /deps                                     Audit dependencies (default subcommand)
+  /deps update                              Apply non-major updates with test verification
+  /deps cve                                 Apply security fixes only
 BANNER
