@@ -37,11 +37,7 @@ describe("slug derivation contract (lib/slug.sh)", () => {
 
   afterAll(() => {
     for (const d of tempDirs) {
-      try {
-        fs.rmSync(d, { recursive: true, force: true });
-      } catch {
-        /* ignore */
-      }
+      fs.rmSync(d, { recursive: true, force: true });
     }
   });
 

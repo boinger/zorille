@@ -95,11 +95,7 @@ describe("Phase 4.4 baseline hash behavior", () => {
 
   afterAll(() => {
     for (const d of tempDirs) {
-      try {
-        fs.rmSync(d, { recursive: true, force: true });
-      } catch {
-        /* ignore */
-      }
+      fs.rmSync(d, { recursive: true, force: true });
     }
   });
 

@@ -42,11 +42,7 @@ describe("probe-exists.sh contract (lib/probe-exists.sh)", () => {
 
   afterAll(() => {
     for (const d of tempDirs) {
-      try {
-        fs.rmSync(d, { recursive: true, force: true });
-      } catch {
-        /* ignore */
-      }
+      fs.rmSync(d, { recursive: true, force: true });
     }
   });
 
