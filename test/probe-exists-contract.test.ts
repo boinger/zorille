@@ -8,15 +8,9 @@ const ROOT = path.resolve(__dirname, "..");
 const PROBE_SCRIPT = path.join(ROOT, "lib", "probe-exists.sh");
 
 /**
- * Sentinel-file probing is a load-bearing contract between /codebase-audit
- * and /plan-fixes (and any future sibling skills). The shared script must
- * always exit 0, print only files that exist, and handle edge cases
+ * lib/probe-exists.sh is a load-bearing contract shared with /plan-fixes.
+ * It must always exit 0, print only files that exist, and handle edge cases
  * (spaces, directories, broken symlinks, zero args) without failing.
- *
- * This test mirrors test/slug-contract.test.ts structure. v1.9.1 introduced
- * both contract scripts in lib/ after the v1.9.0 experience showed that
- * inline bash patterns in SKILL.md get paraphrased by the LLM and drift
- * from canonical form. Named executable scripts resist paraphrase better.
  */
 
 interface RunResult {
@@ -52,8 +46,6 @@ describe("probe-exists.sh contract (lib/probe-exists.sh)", () => {
     return d;
   }
 
-  // --- Script metadata (2 assertions) ---
-
   test("script exists and is executable", () => {
     expect(fs.existsSync(PROBE_SCRIPT)).toBe(true);
     const mode = fs.statSync(PROBE_SCRIPT).mode;
@@ -67,8 +59,6 @@ describe("probe-exists.sh contract (lib/probe-exists.sh)", () => {
     // Matches the lib/slug.sh convention of a load-bearing-contract header.
     expect(content).toMatch(/load-bearing contract/i);
   });
-
-  // --- Behavioral fixtures (7 assertions) ---
 
   test("happy path: all files exist → prints each, exits 0", () => {
     const dir = makeFixtureDir();
@@ -150,8 +140,6 @@ describe("probe-exists.sh contract (lib/probe-exists.sh)", () => {
     expect(r.stdout).toBe("");
   });
 
-  // --- Cross-SKILL.md grep contract (1 assertion) ---
-
   test("SKILL.md preamble and Phase 1.2 both reference lib/probe-exists.sh", () => {
     // The whole point of extracting this script is to make the canonical
     // invocation transmit reliably to the LLM. That requires the invocation
@@ -164,10 +152,9 @@ describe("probe-exists.sh contract (lib/probe-exists.sh)", () => {
     expect(preamble).toContain("lib/probe-exists.sh");
 
     const phase12 = skillMd.match(/### 1\.2 [\s\S]*?(?=\n### )/)?.[0] ?? "";
-    // v1.9.2: Phase 1.2 invokes via $LIB_DIR (skill install dir), not
-    // $REPO_ROOT (audit target's git root). See v1.9.2 plan for the full
-    // bug story — the $REPO_ROOT form was silently failing for every
-    // audit target that wasn't codebase-audit itself.
+    // Phase 1.2 must invoke via $LIB_DIR (skill install dir), not $REPO_ROOT
+    // (audit target's git root) — the latter silently fails for any audit
+    // target that isn't codebase-audit itself.
     expect(phase12).toMatch(
       /bash\s+["']?\$\{?LIB_DIR\}?\/probe-exists\.sh/,
     );

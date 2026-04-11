@@ -5,38 +5,16 @@ import * as os from "os";
 import { spawnSync } from "child_process";
 
 /**
- * Behavioral test for the SKILL.md preamble bash block.
+ * Extracts the preamble bash block from each SKILL.md by content anchor and
+ * executes it from a tmpdir outside this repo, asserting that the shared
+ * `lib/` scripts resolve and run.
  *
- * Why this test exists (read this before deleting):
+ * Distinct from slug-contract.test.ts and probe-exists-contract.test.ts:
+ * those invoke the scripts via absolute paths and verify the scripts in
+ * isolation; this file verifies the preamble can *locate* them. Different
+ * testing surface, both load-bearing.
  *
- * v1.9.0 shipped lib/slug.sh as a shared contract between /codebase-audit
- * and /plan-fixes. v1.9.1 added lib/probe-exists.sh the same way. Both
- * SKILL.md preambles invoked the scripts via `$REPO_ROOT/lib/<script>.sh`,
- * where $REPO_ROOT comes from `git rev-parse --show-toplevel` — i.e., the
- * git root of the audit TARGET, not the skill's install directory. For any
- * audit target that wasn't codebase-audit itself, neither script was
- * reachable. slug.sh silently fell back to `basename $REPO_ROOT`, producing
- * non-canonical slugs. probe-exists.sh had no bash-level fallback; the LLM
- * started defensively hedging with `|| ls <guessed files>` which
- * cascade-cancelled when the guesses didn't pan out.
- *
- * Both bugs shipped because the existing contract tests
- * (test/slug-contract.test.ts and test/probe-exists-contract.test.ts)
- * invoke the scripts via absolute paths (`path.join(ROOT, "lib", ...)`)
- * and NEVER exercise the SKILL.md preamble's lookup path. The contract
- * tests verify the scripts work when invoked directly; they don't verify
- * the preamble can find them. That's the testing gap v1.9.2 closed.
- *
- * THIS test extracts the preamble bash block from SKILL.md by content
- * anchor (finding the fence starting with `LIB_DIR=`), executes it from
- * a temp directory that is NOT the codebase-audit repo, and asserts the
- * shared scripts actually resolve and run. It catches the exact class of
- * bug that escaped v1.9.0 and v1.9.1.
- *
- * DO NOT DELETE THIS FILE thinking it overlaps with slug-contract or
- * probe-exists-contract. Those tests verify the SCRIPTS work in isolation.
- * This test verifies the PREAMBLE can find and invoke them. They are
- * testing different things and both are load-bearing.
+ * Looks redundant with the sibling contract tests. It is not. Do not delete.
  */
 
 const ROOT = path.resolve(__dirname, "..");
@@ -45,21 +23,9 @@ const PLAN_FIXES_SKILL = path.join(ROOT, "plan-fixes", "SKILL.md");
 const LIB_DIR = path.join(ROOT, "lib"); // Where the real scripts actually live
 
 /**
- * Extract the preamble bash block from a SKILL.md file by content anchor.
- *
- * Strategy: find the bash fence whose opening `\`\`\`bash` is followed by
- * content containing `LIB_DIR=` as the canonical first-line marker. Match
- * from that opening fence to its closing fence.
- *
- * Why content anchor and not line range or heading anchor:
- *   - Line range breaks on any SKILL.md edit that shifts the preamble.
- *   - Heading anchor requires `## Preamble` to stay as a stable header.
- *   - Fence-regex fails if there are multiple bash blocks in the preamble
- *     area.
- * Content anchor (finding the fence that STARTS with LIB_DIR=) stays
- * resilient to surrounding edits as long as the preamble keeps LIB_DIR=
- * as its first real assignment. If that invariant breaks, this extractor
- * fails loudly and the implementer knows to re-verify transmission.
+ * Anchors on the bash fence whose body starts with `LIB_DIR=`. Resilient to
+ * surrounding edits as long as that invariant holds; fails loudly if it
+ * doesn't, so the implementer knows to re-verify preamble transmission.
  */
 function extractPreambleBash(skillMdPath: string): string {
   const content = fs.readFileSync(skillMdPath, "utf-8");
@@ -72,8 +38,8 @@ function extractPreambleBash(skillMdPath: string): string {
     throw new Error(
       `Could not extract preamble bash block from ${skillMdPath}. ` +
         `Looking for a \`\`\`bash fence containing LIB_DIR= as its first ` +
-        `non-comment line. If the preamble dropped LIB_DIR=, v1.9.2 ` +
-        `transmission is broken — see test/preamble-contract.test.ts header.`,
+        `non-comment line. If the preamble dropped LIB_DIR=, the preamble ` +
+        `script-resolution contract is broken.`,
     );
   }
   return match[1];

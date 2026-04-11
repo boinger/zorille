@@ -5,42 +5,21 @@ import * as os from "os";
 import { spawnSync } from "child_process";
 
 /**
- * Behavioral test for SKILL.md Phase 4.4 — the baseline hash pattern.
- *
- * v1.9.0 shipped with a heredoc quoting bug that caused baselines to be
- * written with literal `$(echo -n ... | shasum)` strings in the `id` fields
- * instead of computed SHA-256 hashes. This test catches any future regression
- * by actually running the Phase 4.4 pattern against fixture findings and
- * asserting the resulting baseline has real hex hashes.
- *
- * Critically, one of the fixture findings contains a literal `$` in its title
- * ("Missing $PATH validation"). Under the v1.9.0 bug, this finding's title
- * would get environment-expanded (if an unquoted heredoc were used). Under
- * the v1.9.1 placeholder+sed pattern, single-quoted heredoc prevents any
- * expansion and the title survives intact. The test asserts both the hash
- * format AND hash stability across repeated runs — if the implementation
- * regressed to an unquoted heredoc, the $PATH expansion would make the hash
- * non-deterministic (because $PATH varies by environment).
+ * Exercises the Phase 4.4 baseline-hash pattern. Asserts that finding `id`
+ * fields are real SHA-256 hex (not literal `$(echo ...)` strings) and that
+ * hashes are stable across runs even when titles contain `$`-prefixed
+ * substrings that an unquoted heredoc would env-expand.
  */
 
 const ROOT = path.resolve(__dirname, "..");
 const SKILL_MD = fs.readFileSync(path.join(ROOT, "SKILL.md"), "utf-8");
 
-/**
- * The Phase 4.4 SKILL.md content is prose + an example bash block. For a
- * behavioral test, we don't need to extract and execute the example verbatim
- * (that would couple the test to the prose). Instead, we construct a minimal
- * script that exercises the SAME pattern the example teaches: tool fallback,
- * compute-first, single-quoted heredoc with placeholders, sed substitution,
- * integrity guard. If the SKILL.md example teaches a different pattern in
- * the future, the structural tests in skill-validation.test.ts will catch it;
- * this file tests the pattern itself works.
- */
+// Builds a minimal script mirroring the Phase 4.4 pattern (tool fallback,
+// compute-first, single-quoted heredoc + sed, integrity guard) without
+// extracting the SKILL.md example verbatim — keeps this test decoupled from
+// prose edits. Structural validation lives in skill-validation.test.ts.
 function buildPhase44TestScript(outputPath: string): string {
-  // The fixture deliberately includes a title with a literal $ to regression-
-  // test the heredoc quoting. The $PATH string MUST end up in the resulting
-  // JSON file unchanged; if it gets env-expanded, the test will fail the
-  // "title contains literal $PATH" assertion.
+  // Fixture title contains a literal `$PATH` to catch heredoc env-expansion.
   return `#!/usr/bin/env bash
 set -euo pipefail
 
@@ -134,10 +113,9 @@ describe("Phase 4.4 baseline hash behavior", () => {
   });
 
   test("finding with literal $ in title is NOT mangled by env expansion", () => {
-    // The v1.9.1 fix uses a single-quoted heredoc so `$PATH` stays literal
-    // in the output. If the implementation ever regresses to an unquoted
-    // heredoc, `$PATH` would get expanded to the caller's actual PATH env
-    // var and this assertion would fail.
+    // Single-quoted heredoc keeps `$PATH` literal in the output. An unquoted
+    // heredoc would expand it to the caller's PATH env var and fail this
+    // assertion.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "phase44-"));
     tempDirs.push(dir);
     const baseline = path.join(dir, "baseline.json");

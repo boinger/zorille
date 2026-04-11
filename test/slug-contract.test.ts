@@ -8,11 +8,9 @@ const ROOT = path.resolve(__dirname, "..");
 const SLUG_SCRIPT = path.join(ROOT, "lib", "slug.sh");
 
 /**
- * Slug derivation is a load-bearing contract between /codebase-audit and
- * /plan-fixes. Both skills must compute the same slug for the same repo so
- * that /plan-fixes's auto-discovery can locate the baseline that
- * /codebase-audit just wrote. This test enforces the derivation against
- * fixture URLs.
+ * lib/slug.sh is a load-bearing contract: both skills must compute the same
+ * slug for the same repo so /plan-fixes's auto-discovery can locate the
+ * baseline /codebase-audit just wrote. Enforced against fixture URLs.
  */
 
 function runSlug(cwd: string): string {
@@ -86,12 +84,8 @@ describe("slug derivation contract (lib/slug.sh)", () => {
     // When it does exist, both files must contain the same invocation pattern.
     if (fs.existsSync(pfSkillPath)) {
       const pfSkill = fs.readFileSync(pfSkillPath, "utf-8");
-      // v1.9.2: both SKILL.md files must invoke slug.sh via $LIB_DIR
-      // (the skill's install directory), NOT $REPO_ROOT (the audit target's
-      // git root). $REPO_ROOT points at whatever project the skill is
-      // auditing, which almost never contains a lib/slug.sh. The broken
-      // form passed earlier contract tests because those tests invoked the
-      // script via absolute path, bypassing the SKILL.md preamble entirely.
+      // Both preambles must invoke slug.sh via $LIB_DIR (skill install dir),
+      // not $REPO_ROOT (audit target).
       const pattern = /bash\s+["']?\$\{?LIB_DIR\}?\/slug\.sh["']?/;
       expect(cbaSkill).toMatch(pattern);
       expect(pfSkill).toMatch(pattern);
