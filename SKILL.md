@@ -240,6 +240,8 @@ Detect the package manager and run the appropriate audit command if available. *
 
 If the audit tool is not installed or the command fails, skip gracefully and note "dependency audit tool not available" in the report.
 
+For deeper dependency investigation and remediation beyond this quick scan, suggest the user run `/deps` (or `/deps cve` for security-only fixes).
+
 **If `jq` is not installed**, fall back to: run the audit command with stdout redirected to `/tmp/audit-$SLUG.json`, then use Read against that file to inspect it. Never dump raw audit JSON to the conversation.
 
 ### 1.8 Size-based strategy decision
@@ -459,7 +461,7 @@ The report should contain:
 3. **Project Profile**: Language, framework, size, test coverage estimate, git activity
 4. **Architecture Diagram**: ASCII diagram from Phase 2 (skip in quick mode)
 5. **Findings by Severity**: Grouped by severity, then by category within each severity level
-6. **Dependency Vulnerabilities**: Summary from Phase 1 CVE check (if any found)
+6. **Dependency Vulnerabilities**: Summary from Phase 1 CVE check (if any found). Note that `/deps` can investigate and remediate these further.
 7. **Churn Hotspots**: Top files by change frequency and bus factor
 8. **Summary Table**: Category x severity matrix with counts
 9. **Top 5 Priorities**: The 5 most impactful things to fix, in order

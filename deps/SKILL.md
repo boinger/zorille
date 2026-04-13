@@ -8,7 +8,8 @@ description: |
   tiered updates with test verification), cve (focus on known security
   advisories only), triage (prioritize open Dependabot/Renovate PRs).
   Never auto-bumps majors without explicit approval; preserves lockfile
-  integrity via native tooling.
+  integrity via native tooling. Complements /codebase-audit's dependency
+  vulnerability scan with deeper investigation and remediation.
 allowed-tools:
   - Bash
   - Read

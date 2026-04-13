@@ -6,7 +6,7 @@ Three Claude Code skills for finding what's wrong in a codebase and fixing it: b
 
 - **`/codebase-audit`** finds problems. Cold-start audit of any codebase: bugs, security issues, architectural problems, tech debt, test gaps. Writes a structured report and a `baseline.json` for regression tracking. Read-only by default; opt in to mechanical fixes with `--quick-fix`.
 - **`/plan-fixes`** turns problems into fix plans. Reads the baseline `/codebase-audit` writes — or any SARIF 2.1.0 source (CodeQL, ESLint, Semgrep, Sonar, GitHub Code Scanning). Groups findings into PR-sized plans with depth-aware investigation: callers, tests, and adjacent context.
-- **`/deps`** handles dependency hygiene. Audit, update, and CVE remediation across Go, Python, Swift, Dart/Flutter, C#/.NET, and Node.js. Risk-tiered updates (critical → security → patch → minor) with test verification; never auto-bumps majors without approval. Standalone — doesn't depend on the audit/plan-fixes flow.
+- **`/deps`** handles dependency hygiene. Audit, update, and CVE remediation across Go, Python, Swift, Dart/Flutter, C#/.NET, and Node.js. Risk-tiered updates (critical → security → patch → minor) with test verification; never auto-bumps majors without approval. Standalone — doesn't require the audit/plan-fixes flow, but complements `/codebase-audit`'s quick CVE scan with deeper investigation and remediation.
 
 The slash commands are `/codebase-audit`, `/plan-fixes`, and `/deps` regardless of where you cloned the repo. (For the story behind the repo name, see the bottom of this file.)
 
