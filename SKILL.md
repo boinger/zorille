@@ -1,6 +1,6 @@
 ---
 name: codebase-audit
-version: 1.10.0
+version: 1.11.0
 description: |
   Full codebase audit. Analyzes an entire project cold, no diff, no branch context,
   producing a structured report covering bugs, security issues, architectural problems,

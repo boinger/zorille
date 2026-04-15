@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Fixes
+
+- **`/issue-forensics` 0.1.0 → 0.1.1**: entry gate and target-repo
+  resolution reshaped from "user clicks through every question" to
+  "Claude reasons, user confirms." Phase 2 now expects Claude to form
+  its own Q1–Q4 opinions from finding context and present them as a
+  single classification + one-step veto, rather than routing the user
+  through four sequential AskUserQuestion calls. Phase 1 uses inline
+  announcement (`Target: <slug> (from cwd)`) in the common case; the
+  blocking prompt only fires when cwd isn't a git repo. First-
+  invocation DX fix. See `issue-forensics/CHANGELOG.md` for detail.
+
 ## [1.11.0] - 2026-04-15
 
 ### Added

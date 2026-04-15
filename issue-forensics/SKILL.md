@@ -1,6 +1,6 @@
 ---
 name: issue-forensics
-version: 0.1.0
+version: 0.1.1
 description: |
   Apply investigative rigor to non-trivial external-contribution findings
   before drafting an upstream issue or PR. Four-question entry gate routes
@@ -65,32 +65,23 @@ Flags compose.
 
 ## Phase 1: Target-repo confirmation
 
-**Ask first, don't guess.** The target repo determines where notes get written, so it must be resolved before any other state accumulates.
+**Ask first, don't guess — but don't waste a click on the obvious case.** The target repo determines where notes get written, so it must be visible before any other state accumulates. The common case (cwd IS the target) doesn't warrant a blocking prompt; announcing the derived target is enough — the user can interject or re-invoke with `--target` if wrong.
 
-If `--target` was passed, use that value and skip the prompt.
+Resolution rules:
 
-Otherwise, ask via AskUserQuestion:
-
-> "What repo are we investigating? Defaults to the current directory, but if you're investigating an upstream repo from a workspace dir (give-back session, scratch directory, or similar), type the slug, path, or URL."
->
-> Default option: "Use cwd slug: `<CWD_SLUG>`" (shown only if cwd is a git repo OR if CWD_SLUG is a sensible basename)
-> Type-in option: "Other (enter slug, repo path, or remote URL)"
-
-If the user picks "Other" or provides a URL/path, normalize it via:
-
-```bash
-SLUG=$(bash "$LIB_DIR/slug.sh" "<user-input>")
-```
-
-If cwd is not a git repo AND no arg or "Other" was supplied, the prompt must fire without a pre-filled default. Do not proceed until SLUG is resolved.
+- **`--target <slug|path|url>` passed** → use it. Normalize via `bash "$LIB_DIR/slug.sh" "<arg>"`. No prompt. Announce the resolved slug.
+- **cwd is a git repo AND cwd-derived slug exists** → derive from cwd. Announce the target inline (e.g., `Target: grafana-loki (from cwd)`) and proceed. No AskUserQuestion. If the user says "no, that's wrong" in their next message or types `--target ...`, restart the phase with the corrected value.
+- **cwd is NOT a git repo** (no git remote, or user ran skill from a non-repo dir) → there is no sensible default. ASK via AskUserQuestion: "cwd isn't a git repo, so I can't auto-derive the target. What repo are we investigating?" with a type-in option.
 
 **Edge case — URL without local clone:** if the user supplied a URL for a repo they haven't cloned locally, derive the slug, write notes, but flag in the scratchpad that local git operations (Pillar 3 archaeology) will be unavailable unless they clone. Some investigation still works from public GitHub data alone via WebFetch / `gh`.
 
-Print the resolved slug back: `Target: <SLUG>`. User can abort here if it's wrong.
+**Do not make the user click when you have the information to decide.** The announcement pattern keeps target resolution visible without blocking on trivial confirmation.
 
 ## Phase 2: Entry gate
 
-Four yes/no questions determine whether the full pillar sweep applies, or whether the quick-report exit is the right output. If `--force` or `--quick-report` was passed, skip this phase.
+Four yes/no questions classify the finding. If `--force` or `--quick-report` was passed, skip this phase.
+
+**You, Claude, form the opinion — the user confirms or overrides.** You have the finding in front of you. Do not route the user through four sequential AskUserQuestion calls when you can reason about each question and put your answers on the table for a single veto step. That makes the user do the cognitive work the skill exists to do.
 
 All four questions read the same direction: "yes" means forensics ceremony is warranted, "no" means lean toward the quick-report path.
 
@@ -103,7 +94,34 @@ All four questions read the same direction: "yes" means forensics ceremony is wa
 
 **Threshold:** 2+ "no" answers across Q1–Q4 (including the Q1 hard gate) → exit to quick-report. Otherwise → proceed to Phase 4.
 
-Ask the four questions via a single AskUserQuestion with yes/no per question, or as sequential prompts if the interface warrants. Log the answers in the scratchpad frontmatter's `gate` field (Phase 7).
+### How to run this phase
+
+1. Read the finding context the user has shared (prior conversation, a scratchpad, an audit report, whatever's available). If no finding context is visible yet, ask: "What's the finding? One sentence is enough." — that's the ONLY question you should need to ask before classifying.
+
+2. Form your own answer to each of Q1–Q4 with a one-sentence reason drawn from the finding. Write them out as a block. Include the verdict.
+
+   Example:
+
+   ```
+   Gate classification for <finding description>:
+     Q1 non-trivial?          yes — <reason from the finding>
+     Q2 maintainer surprise?  yes/no — <reason>
+     Q3 challenging code?     yes/no — <reason>
+     Q4 design decision?      yes/no — <reason>
+
+   Score: N/4 yes → <proceed with full pillar sweep | exit to quick-report>
+   ```
+
+3. Present it as a SINGLE AskUserQuestion with three options:
+   - "Proceed as classified" (recommended)
+   - "Override specific answers" (user tells you which Q to flip and why)
+   - "Go to quick-report regardless" (user overrides toward the lighter path)
+
+4. Log the final answers (after any user overrides) in the scratchpad frontmatter's `gate` field (Phase 7).
+
+### When to ask more
+
+If the finding context is genuinely ambiguous on a specific question — you have low confidence and a correct classification matters — say so in your reasoning ("Q2 I'm unsure — gap might be documented in CONTRIBUTING.md, which I haven't read") and let the user factor it in. Don't fake certainty. But also don't convert every question into a user click; the skill's job is to bring reasoning, not just forms.
 
 ## Phase 3: Quick-report exit (common-case output)
 

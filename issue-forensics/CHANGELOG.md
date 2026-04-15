@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.1.1] - 2026-04-15
+
+### Fixes
+
+- **Entry gate no longer routes the user through four sequential
+  yes/no clicks.** Phase 2 now expects Claude to read the finding,
+  form its own opinion on Q1–Q4 with one-sentence reasoning for each,
+  and present the classification as a SINGLE AskUserQuestion with
+  three options: proceed as classified, override specific answers,
+  or go to quick-report regardless. The prior flow made the user do
+  the cognitive work the skill was built to bring — a DX miss caught
+  on first real invocation.
+- **Target-repo resolution uses announcement, not a blocking prompt,
+  in the common case.** Phase 1 now: if cwd is a git repo and a
+  sensible slug derives, Claude announces the resolved target inline
+  (`Target: grafana-loki (from cwd)`) and proceeds. The blocking
+  AskUserQuestion only fires when cwd isn't a git repo (no sensible
+  default available). `--target` flag remains the explicit bypass.
+  This honors "don't guess silently" (announcement is visible) without
+  making every invocation cost a confirmation click.
+
 ## [0.1.0] - 2026-04-14
 
 Initial release. A reusable skill for applying investigative rigor to
