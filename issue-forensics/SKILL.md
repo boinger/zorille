@@ -1,6 +1,6 @@
 ---
 name: issue-forensics
-version: 0.1.1
+version: 0.1.2
 description: |
   Apply investigative rigor to non-trivial external-contribution findings
   before drafting an upstream issue or PR. Four-question entry gate routes
@@ -60,6 +60,9 @@ The skill's job is NOT to substitute for judgment. The pillars are prompts, not 
 - `/issue-forensics --quick-report` — skip both the gate AND the pillars. Produce the quick-report template directly. For routine fixes you've already classified.
 - `/issue-forensics --resume <path>` — reopen a specific scratchpad. Same-day same-slug auto-detection still runs by default; use this flag for manual selection.
 - `/issue-forensics --skip-pillar <N>` — assert that pillar N (1–5) is not applicable. User reason is logged in the scratchpad. Can repeat: `--skip-pillar 2 --skip-pillar 3`.
+- `/issue-forensics --security` — force security-shape classification ON. Skip the assessment in Phase 2; Phase 5.5 disclosure-path probe will fire.
+- `/issue-forensics --not-security` — force security-shape classification OFF. Skip the Phase 2 assessment AND the Pillar 4 mid-trigger; Phase 5.5 disclosure-path probe will NOT fire even if pillar evidence later suggests otherwise.
+- `/issue-forensics --probe-web` — opt-in for Phase 5.5 probe #3 (RFC 9116 `security.txt` on org website). Default-off because the WebFetch hits the target org's web logs, telegraphing the investigation.
 
 Flags compose.
 
@@ -79,11 +82,11 @@ Resolution rules:
 
 ## Phase 2: Entry gate
 
-Four yes/no questions classify the finding. If `--force` or `--quick-report` was passed, skip this phase.
+Four yes/no questions classify the finding, plus a fifth security-shape assessment that may trigger a disclosure-path probe later. If `--force` or `--quick-report` was passed, skip this phase.
 
-**You, Claude, form the opinion — the user confirms or overrides.** You have the finding in front of you. Do not route the user through four sequential AskUserQuestion calls when you can reason about each question and put your answers on the table for a single veto step. That makes the user do the cognitive work the skill exists to do.
+**You, Claude, form the opinion — the user confirms or overrides.** You have the finding in front of you. Do not route the user through five sequential AskUserQuestion calls when you can reason about each question and put your answers on the table for a single veto step. That makes the user do the cognitive work the skill exists to do.
 
-All four questions read the same direction: "yes" means forensics ceremony is warranted, "no" means lean toward the quick-report path.
+All four gate questions read the same direction: "yes" means forensics ceremony is warranted, "no" means lean toward the quick-report path.
 
 **Q1 is a HARD GATE.** If Q1 = "no", exit to quick-report regardless of Q2–Q4. Q1 is qualitatively different from the others: a truly trivial fix (typo, version bump, one-liner) never earns the ceremony.
 
@@ -94,11 +97,32 @@ All four questions read the same direction: "yes" means forensics ceremony is wa
 
 **Threshold:** 2+ "no" answers across Q1–Q4 (including the Q1 hard gate) → exit to quick-report. Otherwise → proceed to Phase 4.
 
+### Security-shape assessment (fifth dimension)
+
+Alongside Q1–Q4, classify whether the finding is **security-shaped**. This is independent of the gate threshold: a finding can be security-shaped AND quick-report (rare but possible — e.g., trivial fix to an exposed credential), or pillar-worthy AND not security-shaped. The classification routes whether Phase 5.5 (Disclosure path check) fires later.
+
+Concrete rubric — finding is security-shaped if it involves any of:
+
+- auth / authz bypass
+- path traversal, directory escape, symlink follow
+- injection (SQL, command, template, header, log, LDAP, XPath, etc.)
+- memory safety (buffer overflow, UAF, double-free, OOB read/write)
+- cryptographic misuse (weak primitives, bad IV/nonce, timing leaks)
+- information disclosure (secret leakage, side-channel)
+- supply chain (dep pinning, build-time tampering, update channel)
+- DoS via user input (algorithmic complexity, resource exhaustion)
+
+If ambiguous, classify as `unknown` and note the uncertainty — Phase 5.5 will re-evaluate with pillar evidence.
+
+**Override flags:**
+- `--security` forces `security_shaped: yes` regardless of assessment.
+- `--not-security` forces `security_shaped: no` regardless of assessment. **Pillar 4 mid-trigger respects this** — if the user has explicitly overridden, do not re-prompt even if pillar evidence later surfaces concrete failure surfaces.
+
 ### How to run this phase
 
 1. Read the finding context the user has shared (prior conversation, a scratchpad, an audit report, whatever's available). If no finding context is visible yet, ask: "What's the finding? One sentence is enough." — that's the ONLY question you should need to ask before classifying.
 
-2. Form your own answer to each of Q1–Q4 with a one-sentence reason drawn from the finding. Write them out as a block. Include the verdict.
+2. Form your own answer to each of Q1–Q4 AND security-shape with a one-sentence reason drawn from the finding. Write them out as a block. Include the verdict.
 
    Example:
 
@@ -108,16 +132,18 @@ All four questions read the same direction: "yes" means forensics ceremony is wa
      Q2 maintainer surprise?  yes/no — <reason>
      Q3 challenging code?     yes/no — <reason>
      Q4 design decision?      yes/no — <reason>
+     Security-shaped?         yes/no/unknown — <reason against rubric>
 
    Score: N/4 yes → <proceed with full pillar sweep | exit to quick-report>
+   Security-shaped: <yes|no|unknown> → <will run Phase 5.5 disclosure probe | no probe needed | revisit at Phase 5.5 with pillar evidence>
    ```
 
 3. Present it as a SINGLE AskUserQuestion with three options:
    - "Proceed as classified" (recommended)
-   - "Override specific answers" (user tells you which Q to flip and why)
+   - "Override specific answers" (user tells you which to flip and why)
    - "Go to quick-report regardless" (user overrides toward the lighter path)
 
-4. Log the final answers (after any user overrides) in the scratchpad frontmatter's `gate` field (Phase 7).
+4. Log the final answers (after any user overrides) in the scratchpad frontmatter's `gate` field and `security_shaped` field (Phase 7).
 
 ### When to ask more
 
@@ -196,14 +222,26 @@ If `--skip-pillar <N>` was passed, skip pillar N and log the user's reason (ask 
 
 ### Pillar 1: Pin your references
 
-Capture the current commit SHA at investigation start:
+Capture the current commit SHA at investigation start. **Always the FULL 40-character SHA**:
 
 ```bash
 cd <target-repo-local-path>  # or fetch via gh/WebFetch if no local clone
-git rev-parse HEAD
+git rev-parse HEAD            # full 40-char SHA, never abbreviated
 ```
 
-**GATE ASSERTION: every file reference in the scratchpad and the draft MUST use a SHA-pinned permalink of the form `<repo-url>/blob/<SHA>/<path>#L<line>-L<line>`.** Branch URLs (`/blob/main/...`, `/blob/master/...`) are forbidden — they silently drift when the branch moves. Bare file paths without permalinks are forbidden in the final draft.
+**GATE ASSERTION: every file reference in the scratchpad and the draft MUST use a SHA-pinned permalink with the FULL 40-character SHA**, of the form `<repo-url>/blob/<SHA>/<path>#L<line>-L<line>` (e.g., `https://github.com/grafana/loki/blob/8553815420c01d33d7da4f56b80df8e3a36b1d9b/path/to/file.go#L42-L58`).
+
+- **Branch URLs** (`/blob/main/...`, `/blob/master/...`) are forbidden — they silently drift when the branch moves.
+- **Bare file paths** without permalinks are forbidden in the final draft.
+- **Abbreviated SHAs** (the 7-12 char form from `git log` output, e.g. `3d0ad25f12`) are forbidden in the final draft. They resolve today on GitHub but can collide over years as the repo grows. Pillar 1's whole point is durability against the future; short SHAs defeat it.
+
+When constructing permalinks from `git log` output (which prints abbreviated SHAs by default), always re-derive the full SHA before building the URL:
+
+```bash
+git rev-parse <short-sha>     # returns the full 40-char form
+```
+
+Use the full form in every permalink. No exceptions.
 
 Record the SHA in the scratchpad frontmatter as `commit_sha` (Phase 7).
 
@@ -272,6 +310,28 @@ Multiple surfaces strengthen the argument. Diminishing returns after three or fo
 
 **N/A rendering:** P4 only applies when you're disproving existing code. If your finding is purely additive ("this new functionality is missing"), P4 has no work to do.
 
+**Mid-pillar trigger — security-shape re-classification.** When P4 produces its FIRST concrete file:line failure surface, AND the gate classified `security_shaped: no`, AND `--not-security` was NOT passed: pause and re-classify immediately rather than waiting for Phase 5.5.
+
+```
+Pillar 4 surfaced a concrete failure scenario:
+  <file:line> — <one-line description>
+
+This looks security-shaped now (gate classified: no).
+Pause investigation to decide disclosure path?
+
+  A) Yes — switch to responsible-disclosure posture now. Halt pillar
+     work. Run Phase 5.5 immediately.
+  B) Defer — continue investigation; re-confirm at Phase 5.5 start.
+  C) Override — no, still not security-shaped (record reason).
+```
+
+The point is to catch security shape BEFORE the user invests another 15-30 min investigating publicly when they should be in private-disclosure mode. The Phase 5.5 start re-confirmation remains as the safety net for cases where the user picked Defer or where the trigger didn't fire.
+
+**Suppression conditions** — the mid-trigger does NOT fire when:
+- `--not-security` was passed (user explicitly overrode; honor that).
+- Gate already classified `security_shaped: yes` (posture is already correct).
+- Gate classified `security_shaped: unknown` and pillar evidence is also ambiguous (re-evaluate at Phase 5.5 start instead).
+
 ### Pillar 5: Trace the callers
 
 Enumerate every production call site you can find, with permalinks. The goal is to confirm or deny the scenarios where the problematic behavior could fire.
@@ -284,6 +344,168 @@ Concrete operations:
 **GATE ASSERTION: the caller trace MUST admit its own limits.** Phrase earned humility explicitly: "If there's a caller I missed — especially one where `<the problematic sharing pattern>` is genuinely present — I'd want to hear about it." Fake exhaustiveness (claiming to have traced all callers when you can't verify external consumers) is a fail.
 
 **N/A rendering:** for library code with unknown external consumers, state the boundary: "Traced callers within this repo; external consumers unknown."
+
+## Phase 5.5: Disclosure path check (security-shaped findings only)
+
+Conditional phase. Fires only when `security_shaped` is `yes` after re-evaluation. Skipped entirely when `--not-security` was passed.
+
+### Re-evaluation (start of phase)
+
+The Phase 2 gate classified `security_shaped` based on the finding description alone. Now you have pillar evidence in hand. Re-classify:
+
+- **If gate said NO but pillars surfaced security shape** (e.g., Pillar 4 found a concrete file:line memory-safety surface and the user did not select "Override" at the mid-trigger): announce "Pillar evidence shifted classification: this looks security-shaped now. Running disclosure-path probe." Update `security_shaped: yes` in the scratchpad. Proceed with the probe.
+- **If gate said YES but pillars did not confirm** (the suspected vulnerability didn't materialize, no disprove succeeded): announce "Gate flagged security-shaped but pillar evidence didn't confirm. Skipping disclosure-path probe." Update `security_shaped: no`. Skip to Phase 6.
+- **If gate and pillars agree**: proceed without a re-classification notice.
+
+Override flags: `--security` forces yes regardless of pillar evidence; `--not-security` forces no AND skips the entire phase. The Pillar 4 mid-trigger respects `--not-security` — if the user has explicitly overridden, do not re-prompt even if pillar evidence later surfaces concrete failure surfaces.
+
+### Probes (4 surfaces)
+
+Probe the target project's disclosure surfaces BEFORE producing the draft. Responsible disclosure takes precedence over the anti-squatting timing discipline: if the project publishes a contact or policy, use it.
+
+Probe in this order, surface the first hit:
+
+#### Probe 1: Security policy (GitHub-native, multi-source fallback)
+
+```bash
+# First: GitHub community profile API tells us if a policy is registered
+POLICY_URL=$(gh api repos/<owner>/<repo>/community/profile \
+  --jq .files.security.url 2>/dev/null)
+
+# If null, fall through to file probes (some repos have SECURITY.md
+# without registering it via the community profile UI):
+if [ -z "$POLICY_URL" ] || [ "$POLICY_URL" = "null" ]; then
+  # Try .github/SECURITY.md
+  gh api repos/<owner>/<repo>/contents/.github/SECURITY.md \
+    --jq .download_url 2>/dev/null
+  # Then root SECURITY.md
+  gh api repos/<owner>/<repo>/contents/SECURITY.md \
+    --jq .download_url 2>/dev/null
+fi
+```
+
+First hit wins. Read the file content (`gh api ... --jq .content | base64 -d`) for the actual disclosure instructions.
+
+**Cached-URL edge case:** if community/profile returns a URL but the underlying file has been deleted since the GitHub cache populated, the API still returns the stale URL. Before surfacing it as the disclosure path, test it with a HEAD request (e.g., `gh api -X HEAD <url> -i 2>&1 | head -1`). If the URL 404s when followed, fall through to the `.github/SECURITY.md` and root `SECURITY.md` file-probe fallbacks rather than reporting a dead URL as the disclosure path.
+
+#### Probe 2: GitHub private vulnerability reporting (UI-scrape, NOT API)
+
+The `gh api repos/<owner>/<repo>/private-vulnerability-reporting` endpoint requires admin auth and returns 403 for external investigators. Detect via the public new-advisory page instead:
+
+```bash
+# Returns 200 if PVR is enabled, 404 if not.
+gh api repos/<owner>/<repo>/security/advisories/new -i 2>/dev/null \
+  | head -1 | grep -qE '^HTTP/[12].* 200' && echo "PVR_ENABLED"
+```
+
+If enabled, the disclosure path is "Click 'Report a vulnerability' on the repo's Security tab" — link to `https://github.com/<owner>/<repo>/security/advisories/new`.
+
+> **Brittleness note:** This probe relies on unofficial GitHub UI behavior (HTML-page-via-API-path, not a published JSON API contract). GitHub may have changed the status code behavior at any time — return 200 always with a "PVR not enabled" page, return 403 for unauthenticated requests, redirect to a login page, etc. If PVR detection starts producing obviously-wrong results (e.g., every repo reports enabled, or every repo reports disabled), revisit the probe — GitHub may have changed the behavior. The probe would otherwise silently produce wrong answers.
+
+#### Probe 3: RFC 9116 `security.txt` (OPT-IN via `--probe-web`)
+
+This probe is OFF by default because the WebFetch hits the target org's web server logs, telegraphing the investigation before responsible disclosure. Only fires when the user passes `--probe-web` or accepts a one-time prompt during this phase.
+
+When fired, ONLY use authoritative GitHub-API-derived domains. Never guess TLDs from the owner name — `<owner>.com` may be an unrelated party that happens to own that domain, and probing it leaks information about your investigation.
+
+```bash
+# Step 1: try the repo's homepage field
+DOMAIN=$(gh api repos/<owner>/<repo> --jq .homepage)
+
+# Step 2: if empty, try the org's blog field
+if [ -z "$DOMAIN" ] || [ "$DOMAIN" = "null" ]; then
+  DOMAIN=$(gh api orgs/<owner> --jq .blog)
+fi
+```
+
+If a domain is found, WebFetch:
+- `https://<domain>/.well-known/security.txt`
+- `https://<domain>/security.txt` (legacy fallback)
+
+If both `homepage` and `blog` are empty/null, SKIP probe #3. Log "no authoritative org domain known — skipped probe #3."
+
+**Expires field handling** (RFC 9116 §2.5.5): if the security.txt has an `Expires:` field and the date has passed, treat the probe as "found-but-stale" — surface the contact info to the user but flag "WARNING: security.txt expired on <date>; org may have changed disclosure policy. Verify before submitting." Don't silently treat expired files as absent.
+
+#### Probe 4: `security@` email or security section in CONTRIBUTING.md / README
+
+```bash
+# Pull both files via gh API (no need for local clone)
+for FILE in CONTRIBUTING.md README.md docs/CONTRIBUTING.md; do
+  gh api repos/<owner>/<repo>/contents/$FILE --jq .content 2>/dev/null \
+    | base64 -d \
+    | grep -iE 'security[:@_-]|vulnerab|disclose|cve|hackerone|bugcrowd'
+done
+```
+
+Manually inspect any matches. Skip generic boilerplate (`security@example.com`, third-party platform mentions without org context).
+
+### Probe failure handling
+
+Each probe can fail in non-"not-found" ways: gh auth missing, WebFetch TLS error, rate limit, network timeout. On any probe failure (as distinct from a clean "no policy found" result):
+
+- Log the specific error in the scratchpad under `disclosure.probe_errors[]` (see frontmatter schema below).
+- Continue to the next probe — never let one probe's failure block the rest of the sequence.
+
+### After all four probes
+
+Three terminal states:
+
+**A) At least one clean hit** → surface the policy and route the draft to the responsible-disclosure path (`<topic>.private-draft.md` filename, body header, follow the policy's instructions).
+
+**B) Zero clean hits, zero errors** ("nothing found" cleanly) → log "no published disclosure policy found" in the scratchpad and proceed with the default anti-squatting delivery path (`<topic>.draft.md` filename). Record the negative result so you don't imply you skipped the check.
+
+**C) Zero clean hits, ≥1 errors** ("probing blocked"): split based on classification:
+
+- **`security_shaped: no`** → proceed with the public path, with a body-header note "could not verify policy due to probe errors; see `disclosure.probe_errors` in scratchpad." Acceptable risk because the finding isn't security-shaped.
+
+- **`security_shaped: yes`** → **HALT. Do NOT silently default to the public path.** Ask the user explicitly via AskUserQuestion:
+
+  ```
+  All four disclosure probes errored. Cannot verify whether this
+  project publishes a disclosure policy. This finding is classified
+  security-shaped, so silently posting publicly could violate
+  responsible-disclosure norms.
+
+    A) Retry probes (check gh auth, network, etc., then re-run Phase 5.5)
+    B) Manually specify disclosure path (enter URL or email)
+    C) Proceed with public path anyway (flag uncertainty in body header)
+    D) Abort — preserve scratchpad, decide later
+  ```
+
+  Halt is the right default for security-shaped + all-errored because the silent-proceed-to-public failure mode is exactly the responsible-disclosure violation the skill exists to prevent.
+
+### Delivery path branching
+
+Once the probe completes, set the delivery path on the draft. The **filename is the primary guardrail**; the body header is a secondary in-file reminder. Filename catches the case where someone copy-pastes the body into a public issue box without reading the header.
+
+| Probe result | Filename | Delivery instructions |
+|---|---|---|
+| Security policy URL | `<topic>.private-draft.md` | Follow the policy's instructions |
+| Private vulnerability reporting enabled | `<topic>.private-draft.md` | Submit via `https://github.com/<owner>/<repo>/security/advisories/new` |
+| SECURITY.md (any location) | `<topic>.private-draft.md` | Follow the contact/process it documents |
+| RFC 9116 security.txt (probe-web fired) | `<topic>.private-draft.md` | Use the `Contact:` field; respect `Preferred-Languages`. If `Expires` has passed, surface the warning before submitting |
+| security@ email or contact in CONTRIBUTING/README | `<topic>.private-draft.md` | Email per standard responsible-disclosure norms |
+| Nothing found (clean) | `<topic>.draft.md` | Default public path (anti-squatting timing applies) |
+| Probing blocked (all errored) | `<topic>.draft.md` (with override note) | Surface "could not verify policy" to user; default to public path but flag uncertainty in the body header |
+
+The draft's **content** doesn't change; the **filename and delivery header** do.
+
+Body header (top of file, before TL;DR, under frontmatter) — secondary reminder:
+
+```
+> Delivery: RESPONSIBLE DISCLOSURE via <path>. Do not post publicly
+> until coordinated timeline is resolved.
+```
+
+or:
+
+```
+> Delivery: PUBLIC issue + PR. No disclosure policy found; searched
+> security policy, GitHub private reporting,
+> [RFC 9116 (skipped — opt-in only),] CONTRIBUTING.md / README.
+```
+
+**Filename guardrail rationale:** the body header is paste-strippable. The filename is visible in `ls`, in editor tabs, and in any `give-back` carrier UI — much harder to ignore. Both layers together because defense-in-depth is cheap when the marginal cost is one file rename.
 
 ## Phase 6: Draft template (writing-it-up)
 
@@ -443,12 +665,24 @@ gate:
   q2_maintainer_surprise: <yes|no>
   q3_challenging_code: <yes|no>
   q4_design_decision: <yes|no>
+security_shaped: <yes|no|unknown>
 pillars_applied:
   p1: <done|na: reason>
   p2: <done|na: reason>
   p3: <done|na: reason>
   p4: <done|na: reason>
   p5: <done|na: reason>
+disclosure:           # Only present when security_shaped: yes; written by Phase 5.5
+  checked: <ISO-8601-UTC>
+  policy_url: <url or null>
+  private_reporting_enabled: <true|false|unknown>
+  security_md_path: <path or null>
+  security_txt_url: <url or null>     # Only if --probe-web fired
+  contact_email: <email or null>
+  chosen_path: <"policy" | "private_reporting" | "security_md" | "security_txt" | "email" | "public" | "blocked">
+  probe_errors:
+    - probe: <"community_profile" | "security_md_github" | "security_md_root" | "private_reporting" | "security_txt" | "contact_grep">
+      error: <one-line description>
 ---
 
 # Investigation notes: <topic>
@@ -469,9 +703,14 @@ pillars_applied:
 <evidence or N/A with reason>
 ```
 
-**Draft file** — same path but `.draft.md`. Uses the template from Phase 6. Same frontmatter (enables migration and cross-file consistency). Written when the user says the investigation is complete.
+**Draft file** — same directory, but with one of two filenames depending on the Phase 5.5 delivery branch:
 
-Future schemas can add fields (`linked_pr_url`, `draft_version`, etc.). Consumers ignore unknown fields under schema 1 — additive changes don't require a schema bump.
+- `<YYYY-MM-DD>-<topic>.private-draft.md` — when responsible disclosure applies (any clean Phase 5.5 hit).
+- `<YYYY-MM-DD>-<topic>.draft.md` — when the public path applies (no policy found, or `security_shaped: no`).
+
+The filename suffix is the **primary guardrail** preventing accidental public posting of a responsibly-disclosed finding. Same frontmatter as the notes file (enables migration and cross-file consistency).
+
+Both `security_shaped` and `disclosure` are additive fields under schema 1. Consumers under schema 1 ignore unknown fields, per the additive-changes-don't-require-bump rule. Future schemas can add more (`linked_pr_url`, `draft_version`, etc.) without touching existing readers.
 
 ## Reference: the gold-standard exemplar
 
@@ -492,8 +731,10 @@ Each item is a yes/no check. Grades a draft pass/fail. Use it during writing AND
 **Rigor:**
 
 - [ ] Every file reference uses a SHA-pinned permalink. Branch URLs are a fail.
+- [ ] All permalinks use the FULL 40-character SHA, not abbreviated (e.g., `3d0ad25f1228eac83fb295696ae795c99ec5a91b9`, not `3d0ad25f12`). Short SHAs resolve on GitHub today but can collide over years as the repo grows. Pillar 1's whole point is durability — abbreviated SHAs defeat it.
 - [ ] Claims about "existing code is wrong / broken / vestigial" are backed by file:line evidence, not hand-waving.
 - [ ] No emotional language ("clearly broken," "obviously wrong"). Evidence carries the weight.
+- [ ] For security-shaped findings: checked GitHub community profile, SECURITY.md (.github/ and root), GitHub private vulnerability reporting status, RFC 9116 security.txt on org website (if `--probe-web` fired), and security@ contact in CONTRIBUTING.md/README. Delivery path on the draft (filename suffix + body header) respects the result, or explicitly notes "no policy found" after probing.
 
 **Pillar outputs:**
 
@@ -516,3 +757,10 @@ Each item is a yes/no check. Grades a draft pass/fail. Use it during writing AND
 The draft is the skill's output, not the end of the process. The reporter typically holds the draft privately while starting the fix, then posts the issue and the PR close together. This reduces drive-by contributor squatting — scraping a public issue and rushing a PR before the reporter's.
 
 Companion skill `give-back` carries drafts during this private-hold window. `/issue-forensics` produces the draft; `give-back` is the carrier. Neither automates the actual upstream submission — that stays a deliberate manual step.
+
+**Precedence: responsible disclosure beats anti-squatting.** For security-shaped findings, **responsible disclosure takes precedence over anti-squatting timing.** If Phase 5.5 found a published disclosure path, follow it — do NOT post publicly first regardless of whether the PR is ready. Anti-squatting applies only to:
+
+- Non-security findings, OR
+- Security-shaped findings where Phase 5.5 surfaced no published disclosure policy after probing all four surfaces (`disclosure.chosen_path: public`).
+
+The filename suffix from Phase 5.5 (`.private-draft.md` vs `.draft.md`) encodes which discipline applies; treat it as authoritative.

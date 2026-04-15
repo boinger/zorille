@@ -4,6 +4,20 @@
 
 ### Fixes
 
+- **`/issue-forensics` 0.1.1 → 0.1.2**: adds Phase 5.5 disclosure-path
+  check for security-shaped findings, four-probe sequence (GitHub
+  security policy, private vulnerability reporting via UI-scrape,
+  RFC 9116 security.txt opt-in via `--probe-web`, security@ contact
+  grep), filename guardrail (`.private-draft.md` vs `.draft.md`),
+  Pillar 4 mid-trigger for security-shape re-classification, and
+  halt-and-ask on probing-blocked + security_shaped (no silent default
+  to public path). Pillar 1 strengthened to require FULL 40-char SHAs
+  in permalinks (abbreviated SHAs forbidden — they resolve today but
+  collide over years; Pillar 1's whole point is durability). Three new
+  flags: `--security`, `--not-security`, `--probe-web`. Scratchpad
+  frontmatter gains `security_shaped` field and `disclosure` block,
+  additive under existing schema 1. See `issue-forensics/CHANGELOG.md`
+  for detail.
 - **`/issue-forensics` 0.1.0 → 0.1.1**: entry gate and target-repo
   resolution reshaped from "user clicks through every question" to
   "Claude reasons, user confirms." Phase 2 now expects Claude to form

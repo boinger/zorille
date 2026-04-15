@@ -1,5 +1,61 @@
 # Changelog
 
+## [0.1.2] - 2026-04-15
+
+### Added
+
+- **Phase 5.5: disclosure-path check** for security-shaped findings.
+  Conditional phase that fires only when `security_shaped: yes` after
+  re-evaluation. Probes four disclosure surfaces in order: (1) GitHub
+  security policy via community/profile API with SECURITY.md fallback
+  and cached-URL 404 fallthrough; (2) GitHub private vulnerability
+  reporting via `security/advisories/new` UI-scrape (NOT the admin-
+  gated API); (3) RFC 9116 `security.txt` on the org's website (OPT-IN
+  via `--probe-web` only — default-off because the WebFetch hits the
+  target's logs, telegraphing the investigation before responsible
+  disclosure); (4) security@ email or security section in CONTRIBUTING/
+  README.
+- **Security-shape classification** added to Phase 2 entry gate as a
+  fifth assessment alongside Q1–Q4. Concrete rubric: auth bypass, path
+  traversal, injection, memory safety, crypto, info disclosure, supply
+  chain, DoS via input. Three values: `yes | no | unknown`.
+- **Pillar 4 mid-trigger** for security-shape re-classification. When
+  P4 produces its first concrete file:line failure surface AND the gate
+  classified `security_shaped: no`, pause and re-classify immediately
+  so timing discipline shapes the rest of the investigation. Suppressed
+  by `--not-security` and when gate already said yes.
+- **Three new flags**: `--security` (force on), `--not-security` (force
+  off; suppresses Pillar 4 mid-trigger), `--probe-web` (opt-in for the
+  RFC 9116 web probe).
+- **Filename guardrail**: drafts on the responsible-disclosure path are
+  written as `.private-draft.md`; public-path drafts stay `.draft.md`.
+  Filename is the primary guardrail (visible in `ls`, editor tabs,
+  carrier UI); body header `> Delivery: ...` is the secondary reminder.
+- **Halt-and-ask on probing-blocked + security_shaped** combination.
+  When all four probes errored AND the finding is security-shaped, the
+  skill HALTS and presents a four-option AskUserQuestion (retry / manual
+  / proceed-public-anyway / abort) instead of silently defaulting to the
+  public path. The silent-default would defeat the whole point of the
+  security classifier.
+- **Scratchpad frontmatter additions** under existing schema 1
+  (additive, no schema bump): `security_shaped`, `disclosure` block
+  with `chosen_path`, `probe_errors[]`, etc.
+
+### Changed
+
+- **Pillar 1 gate assertion strengthened**: every permalink in the
+  scratchpad and the draft must use the FULL 40-character SHA, not
+  abbreviated (7-12 char) forms from `git log` output. Short SHAs
+  resolve on GitHub today but can collide over years; Pillar 1's whole
+  point is durability against the future. SKILL.md now documents the
+  `git rev-parse <short-sha>` recovery pattern for cases starting from
+  short SHAs in `git log` output. First real-use dogfood (Prusa
+  investigation, v0.1.1) produced a draft mixing full and abbreviated
+  SHAs — this codifies the constraint.
+- **Anti-squatting section** now states the precedence rule: responsible
+  disclosure beats anti-squatting timing. The filename suffix encodes
+  which discipline applies.
+
 ## [0.1.1] - 2026-04-15
 
 ### Fixes

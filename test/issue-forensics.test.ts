@@ -135,6 +135,177 @@ describe("/issue-forensics structural invariants", () => {
   });
 });
 
+describe("/issue-forensics v0.1.2 — disclosure-path check (Phase 5.5)", () => {
+  /**
+   * Structural tests for the v0.1.2 additions: Phase 5.5 disclosure-path
+   * probe, security-shape classification, three new flags, full-SHA Pillar 1
+   * gate, filename guardrail, halt-and-ask on probing-blocked. These are
+   * all documentation tests — they verify Phase 5.5 is documented, not that
+   * it works. Behavioral tests would need an eval framework.
+   */
+
+  let skillContent: string;
+
+  function loadSkill(): string {
+    if (!skillContent) {
+      skillContent = fs.readFileSync(path.join(SKILL_DIR, "SKILL.md"), "utf-8");
+    }
+    return skillContent;
+  }
+
+  test("SKILL.md contains Phase 5.5", () => {
+    const c = loadSkill();
+    expect(c).toMatch(/Phase 5\.5/);
+    expect(c).toMatch(/Disclosure path check/i);
+  });
+
+  test("SKILL.md mentions the four-probe sequence", () => {
+    const c = loadSkill();
+    expect(c).toMatch(/community\/profile/);
+    expect(c).toMatch(/SECURITY\.md/);
+    expect(c).toMatch(/security\/advisories\/new/);
+    expect(c).toMatch(/security\.txt/);
+    expect(c).toMatch(/CONTRIBUTING\.md/);
+  });
+
+  test("SKILL.md does NOT use the broken admin-auth PVR probe", () => {
+    // The /private-vulnerability-reporting --jq .enabled API requires
+    // admin auth and silently 403s for external investigators. v0.1.2
+    // replaced it with the security/advisories/new UI-scrape detection.
+    const c = loadSkill();
+    expect(c).not.toMatch(/private-vulnerability-reporting\s+--jq\s+\.enabled/);
+  });
+
+  test("SKILL.md documents delivery-path branching", () => {
+    const c = loadSkill();
+    expect(c).toMatch(/RESPONSIBLE DISCLOSURE/);
+    expect(c).toMatch(/responsible disclosure (takes precedence|beats anti-squatting)/i);
+  });
+
+  test("SKILL.md documents the --security flag", () => {
+    const c = loadSkill();
+    expect(c).toMatch(/--security\b[^-]/); // --security but not --security-something
+  });
+
+  test("SKILL.md documents the --not-security flag", () => {
+    const c = loadSkill();
+    expect(c).toMatch(/--not-security/);
+  });
+
+  test("SKILL.md documents the --probe-web flag with opt-in rationale", () => {
+    const c = loadSkill();
+    expect(c).toMatch(/--probe-web/);
+    // Rationale must be present so future maintainers know why it's opt-in.
+    expect(c).toMatch(/(telegraph|web logs|opt-in)/i);
+  });
+
+  test("SKILL.md documents the Pillar 4 mid-trigger for re-classification", () => {
+    const c = loadSkill();
+    expect(c).toMatch(/Pillar 4 surfaced/);
+    // The three-option prompt language must be present.
+    expect(c).toMatch(/responsible-disclosure posture/i);
+  });
+
+  test("SKILL.md documents the Phase 5.5 re-evaluation safety net", () => {
+    const c = loadSkill();
+    expect(c).toMatch(/Re-evaluation/i);
+    expect(c).toMatch(/Pillar evidence shifted classification/i);
+  });
+
+  test("SKILL.md documents homepage + org-blog inference for probe #3", () => {
+    const c = loadSkill();
+    // No-TLD-guessing rule: must use repo homepage field, fall back to org blog.
+    expect(c).toMatch(/repos\/<owner>\/<repo>\s*--jq\s*\.homepage/);
+    expect(c).toMatch(/orgs\/<owner>\s*--jq\s*\.blog/);
+    expect(c).toMatch(/SKIP probe #3/);
+  });
+
+  test("SKILL.md documents probe failure handling", () => {
+    const c = loadSkill();
+    expect(c).toMatch(/probe_errors/);
+    expect(c).toMatch(/probing blocked/i);
+  });
+
+  test("SKILL.md documents Expires field handling for security.txt", () => {
+    const c = loadSkill();
+    expect(c).toMatch(/Expires/);
+    expect(c).toMatch(/(stale|expired)/i);
+  });
+
+  test("SKILL.md annotates probe #2 as relying on unofficial GitHub UI", () => {
+    const c = loadSkill();
+    // Must call out that PVR detection is not a stable API contract.
+    expect(c).toMatch(/(unofficial|GitHub may have changed|published JSON API contract)/i);
+  });
+
+  test("SKILL.md documents the cached-URL fallthrough for probe #1", () => {
+    const c = loadSkill();
+    // Must handle the case where community/profile returns a stale URL.
+    expect(c).toMatch(/Cached-URL/);
+    expect(c).toMatch(/(404s when followed|fall through to)/i);
+  });
+
+  test("SKILL.md documents HALT behavior for security_shaped + all-errored", () => {
+    const c = loadSkill();
+    expect(c).toMatch(/All four disclosure probes errored/);
+    expect(c).toMatch(/Manually specify disclosure path/);
+    // Must explicitly halt rather than silently default to public.
+    expect(c).toMatch(/HALT|do NOT silently default/i);
+  });
+
+  test("SKILL.md documents Pillar 4 mid-trigger respects --not-security", () => {
+    const c = loadSkill();
+    // Pillar 4 mid-trigger must NOT re-prompt when user has overridden.
+    expect(c).toMatch(/(respects[^.]*--not-security|--not-security[^.]*respect)/i);
+  });
+
+  test("SKILL.md documents filename suffix as primary guardrail", () => {
+    const c = loadSkill();
+    expect(c).toMatch(/\.private-draft\.md/);
+    expect(c).toMatch(/(primary guardrail|paste-strippable)/i);
+  });
+
+  test("SKILL.md Phase 7 schema includes security_shaped field", () => {
+    const c = loadSkill();
+    expect(c).toMatch(/^security_shaped:\s*<yes\|no\|unknown>/m);
+  });
+
+  test("SKILL.md Phase 7 schema includes disclosure block", () => {
+    const c = loadSkill();
+    expect(c).toMatch(/^disclosure:/m);
+    expect(c).toMatch(/chosen_path:/);
+    expect(c).toMatch(/probe_errors:/);
+  });
+
+  test("Pillar 1 explicitly requires FULL 40-character SHAs", () => {
+    const c = loadSkill();
+    expect(c).toMatch(/FULL 40-character SHA/);
+    expect(c).toMatch(/Abbreviated SHAs/);
+    expect(c).toMatch(/forbidden/);
+  });
+
+  test("Quality checklist Rigor section includes the full-SHA item", () => {
+    const c = loadSkill();
+    // The full-SHA constraint must appear in the Rigor checklist, not just Pillar 1.
+    expect(c).toMatch(/All permalinks use the FULL 40-character SHA/);
+  });
+
+  test("Pillar 1 mentions git rev-parse as the recovery pattern", () => {
+    const c = loadSkill();
+    // When starting from short SHAs in git log output, must recover full form.
+    expect(c).toMatch(/git rev-parse <short-sha>/);
+  });
+
+  test("SKILL.md frontmatter version matches VERSION file (0.1.2)", () => {
+    const version = fs
+      .readFileSync(path.join(SKILL_DIR, "VERSION"), "utf-8")
+      .trim();
+    expect(version).toBe("0.1.2");
+    const c = loadSkill();
+    expect(c).toMatch(/^version:\s*0\.1\.2\s*$/m);
+  });
+});
+
 describe("setup SKILLS array consistency", () => {
   /**
    * The setup script has a hardcoded SKILLS=(...) array at line 5. Adding a
