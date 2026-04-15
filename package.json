@@ -1,7 +1,7 @@
 {
   "name": "zorille",
   "version": "1.0.0",
-  "description": "Three Claude Code skills for codebase hygiene: codebase-audit (find issues) + plan-fixes (turn issues into PR-sized plans, supports SARIF) + deps (dependency audit and risk-tiered updates across Go/Python/Node/etc.)",
+  "description": "Four Claude Code skills for codebase work: codebase-audit (find issues) + plan-fixes (turn issues into PR-sized plans, supports SARIF) + deps (dependency audit and risk-tiered updates across Go/Python/Node/etc.) + issue-forensics (upstream-contribution investigation playbook).",
   "scripts": {
     "test": "bun test",
     "test:evals": "EVALS=1 bun test test/e2e.test.ts"

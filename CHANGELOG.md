@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+## [1.11.0] - 2026-04-15
+
+### Added
+
+- **`/issue-forensics` skill** for applying investigative rigor to
+  non-trivial external-contribution findings before drafting upstream
+  issues or PRs. Four-question entry gate (Q1 as hard gate) routes
+  routine fixes to a quick-report template; substantive findings get a
+  five-pillar playbook: SHA-pinned permalinks (gate assertion), structural
+  twins, history with stated-intent-vs-side-effect discipline, disproof of
+  current design with concrete file:line failure surfaces, exhaustive
+  caller trace with admitted limits. Produces a structured draft modelled
+  on a gold-standard exemplar (Loki #21524, embedded at
+  `issue-forensics/references/loki-21524.md`). Two-file artifact output
+  (`.notes.md` append-only scratchpad + `.draft.md`) with self-describing
+  schema-1 YAML frontmatter. State lives at `$ISSUE_FORENSICS_HOME`
+  (default `~/.issue-forensics/`), mirroring `/codebase-audit`'s
+  `$AUDIT_HOME` pattern. Five escape hatches: `--force`, `--quick-report`,
+  `--resume`, `--skip-pillar`, `--target`. Companion to `give-back` for
+  anti-squatting hold-and-release timing. Per-skill version at
+  `issue-forensics/VERSION` (v0.1.0 initial release); per-skill changelog
+  at `issue-forensics/CHANGELOG.md`.
+
+### Changed
+
+- **`lib/slug.sh`** now accepts an optional URL or filesystem path
+  argument, enabling `/issue-forensics` to derive a slug for investigation
+  targets that aren't cwd (e.g., investigating loki from a give-back
+  workspace directory). Zero-argument invocation is unchanged: both
+  `/codebase-audit` and `/plan-fixes` continue to derive from cwd's git
+  remote origin. Contract extended, not broken. `test/slug-contract.test.ts`
+  updated with cases for URL-mode and path-mode inputs.
+- **`setup` script** now installs four skills instead of three
+  (`SKILLS` array extended with `"issue-forensics"`). Post-install banner
+  lists all four with per-skill versions where available.
+- **README.md, CHANGELOG.md, package.json description** updated from "three
+  skills" to "four skills" framing.
+
 ## [1.10.0] - 2026-04-09
 
 ### Added

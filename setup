@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
-SKILLS=("codebase-audit" "plan-fixes" "deps")
+SKILLS=("codebase-audit" "plan-fixes" "deps" "issue-forensics")
 
 # If codebase-audit is already installed and pointing here, treat this as
 # an upgrade: git pull, then FALL THROUGH to the per-skill install loop.
@@ -41,7 +41,7 @@ for skill in "${SKILLS[@]}"; do
   # Safety: source directory must exist
   if [ ! -d "$SOURCE_SKILL_DIR" ]; then
     echo "ERROR: Source directory not found: $SOURCE_SKILL_DIR"
-    echo "Did you clone the repo fully? plan-fixes/ is a sibling skill in this repo."
+    echo "Did you clone the repo fully? plan-fixes/, deps/, and issue-forensics/ are sibling skills in this repo."
     exit 1
   fi
 
@@ -51,16 +51,20 @@ done
 
 CBA_VERSION=$(cat "$SOURCE_DIR/VERSION")
 PF_VERSION=$(cat "$SOURCE_DIR/plan-fixes/VERSION" 2>/dev/null || echo "?")
+IF_VERSION=$(cat "$SOURCE_DIR/issue-forensics/VERSION" 2>/dev/null || echo "?")
 
 cat <<BANNER
 
 Installed Claude Code skills:
-  /codebase-audit v${CBA_VERSION}  — finds issues (audit + baseline)
-  /plan-fixes     v${PF_VERSION}   — turns findings into fix plans
-  /deps                    — dependency audit + remediation
+  /codebase-audit    v${CBA_VERSION}  — finds issues (audit + baseline)
+  /plan-fixes        v${PF_VERSION}   — turns findings into fix plans
+  /deps                       — dependency audit + remediation
+  /issue-forensics   v${IF_VERSION}   — upstream-contribution investigation playbook
 
 Audit reports saved to ~/.codebase-audits/ on first run.
 Set CODEBASE_AUDIT_HOME to change this location.
+Forensics notes saved to ~/.issue-forensics/ on first run.
+Set ISSUE_FORENSICS_HOME to change this location.
 
 Usage:
   /codebase-audit                           Full audit
@@ -74,4 +78,8 @@ Usage:
   /deps                                     Audit dependencies (default subcommand)
   /deps update                              Apply non-major updates with test verification
   /deps cve                                 Apply security fixes only
+  /issue-forensics                          Investigate a non-trivial upstream finding
+  /issue-forensics --quick-report           Skip gate + pillars; produce quick-report template
+  /issue-forensics --force                  Skip the entry gate; run full pillar sweep
+  /issue-forensics --target <slug|path|url> Bypass target-repo confirmation prompt
 BANNER

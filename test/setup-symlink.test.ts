@@ -103,14 +103,19 @@ function assertNoStrays(): void {
 }
 
 function assertInstallSymlinks(tmpHome: string): void {
-  const cba = path.join(tmpHome, ".claude/skills/codebase-audit");
-  const pf = path.join(tmpHome, ".claude/skills/plan-fixes");
+  // codebase-audit is the repo root (special case); the others are sibling dirs.
+  const expected: Array<[string, string]> = [
+    ["codebase-audit", ROOT],
+    ["plan-fixes", path.join(ROOT, "plan-fixes")],
+    ["deps", path.join(ROOT, "deps")],
+    ["issue-forensics", path.join(ROOT, "issue-forensics")],
+  ];
 
-  expect(isSymlink(cba), `missing install symlink at ${cba}`).toBe(true);
-  expect(fs.readlinkSync(cba)).toBe(ROOT);
-
-  expect(isSymlink(pf), `missing install symlink at ${pf}`).toBe(true);
-  expect(fs.readlinkSync(pf)).toBe(path.join(ROOT, "plan-fixes"));
+  for (const [skill, target] of expected) {
+    const link = path.join(tmpHome, ".claude/skills", skill);
+    expect(isSymlink(link), `missing install symlink at ${link}`).toBe(true);
+    expect(fs.readlinkSync(link)).toBe(target);
+  }
 }
 
 describe("setup: no self-symlink strays on re-run", () => {

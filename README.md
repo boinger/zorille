@@ -1,14 +1,15 @@
 # zorille
 
-Three Claude Code skills for finding what's wrong in a codebase and fixing it: bugs, fix plans, and dependency hygiene.
+Four Claude Code skills for finding what's wrong in a codebase you don't know and doing something useful about it: bugs, fix plans, dependency hygiene, and upstream-contribution forensics.
 
-## Three skills, one repo
+## Four skills, one repo
 
 - **`/codebase-audit`** finds problems. Cold-start audit of any codebase: bugs, security issues, architectural problems, tech debt, test gaps. Writes a structured report and a `baseline.json` for regression tracking. Read-only by default; opt in to mechanical fixes with `--quick-fix`.
 - **`/plan-fixes`** turns problems into fix plans. Reads the baseline `/codebase-audit` writes — or any SARIF 2.1.0 source (CodeQL, ESLint, Semgrep, Sonar, GitHub Code Scanning). Groups findings into PR-sized plans with depth-aware investigation: callers, tests, and adjacent context.
 - **`/deps`** handles dependency hygiene. Audit, update, and CVE remediation across Go, Python, Swift, Dart/Flutter, C#/.NET, and Node.js. Risk-tiered updates (critical → security → patch → minor) with test verification; never auto-bumps majors without approval. Standalone — doesn't require the audit/plan-fixes flow, but complements `/codebase-audit`'s quick CVE scan with deeper investigation and remediation.
+- **`/issue-forensics`** applies investigative rigor to a non-trivial finding before you file an upstream issue or PR. Four-question entry gate routes routine fixes to a quick-report template; substantive findings get a five-pillar playbook: SHA-pinned permalinks, structural twins, history with stated-intent-vs-side-effect discipline, disproof of current design, exhaustive caller trace. Produces a structured draft modelled on a gold-standard exemplar. Companion to give-back for anti-squatting hold-and-release timing.
 
-The slash commands are `/codebase-audit`, `/plan-fixes`, and `/deps` regardless of where you cloned the repo. (For the story behind the repo name, see the bottom of this file.)
+The slash commands are `/codebase-audit`, `/plan-fixes`, `/deps`, and `/issue-forensics` regardless of where you cloned the repo. (For the story behind the repo name, see the bottom of this file.)
 
 ## What this solves
 
@@ -17,6 +18,8 @@ You inherited a codebase you don't know. You need to know what's in there before
 `/plan-fixes` is the bridge from "I have a list of findings" to "I have a PR-sized plan I can hand to a coding agent." It works against `/codebase-audit`'s output, but it also reads SARIF from any external scanner — so existing CodeQL or Semgrep results can become reviewable fix plans without re-scanning.
 
 And `/deps` covers the dependency-hygiene layer of "what's wrong" — outdated packages, known CVEs, deprecated libraries — across the major language ecosystems, with risk-tiered updates that won't silently bump a major version on you.
+
+`/issue-forensics` is the one that turns toward someone else's codebase: once you've found something worth reporting upstream, it applies the same rigor as the audit tools to the write-up itself. Four-question gate to short-circuit routine fixes; full playbook for the non-trivial ones. Produces a structured draft that reads like the issue you wish every contributor filed.
 
 ## What a fix plan looks like
 
@@ -39,7 +42,7 @@ cd ~/Projects/zorille
 ./setup
 ```
 
-After `./setup`, both `/codebase-audit` and `/plan-fixes` are available as slash commands in Claude Code. The setup script is idempotent — re-run it to upgrade.
+After `./setup`, all four slash commands (`/codebase-audit`, `/plan-fixes`, `/deps`, `/issue-forensics`) are available in Claude Code. The setup script is idempotent — re-run it to upgrade.
 
 ## Usage
 
@@ -97,7 +100,7 @@ Idempotent — works for fresh installs and upgrades.
 
 `zorille` is the alternate French spelling of *zorilla* — the African striped polecat (*Ictonyx striatus*), a small carnivore in family Mustelidae. The mustelids are stoats, martens, weasels, polecats, otters, badgers, ferrets: curious, smart little animals.
 
-I felt like being named after a mustelid fit the work — small, sharp-nosed creatures that find things hidden under rocks, which is roughly what `/codebase-audit`, `/plan-fixes`, and `/deps` do for a codebase you don't yet know. And I picked "zorille" specifically (not the more common English "zorilla") because there weren't any other projects named that.
+I felt like being named after a mustelid fit the work — small, sharp-nosed creatures that find things hidden under rocks, which is roughly what `/codebase-audit`, `/plan-fixes`, `/deps`, and `/issue-forensics` do for codebases you don't yet know (your own or someone else's). And I picked "zorille" specifically (not the more common English "zorilla") because there weren't any other projects named that.
 
 A literal name like `code-tools` or `audit-suite` would have been boring. The skills inside have those descriptive names because that's what skills need; the repo gets to have personality.
 

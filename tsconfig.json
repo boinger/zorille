@@ -8,5 +8,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["test/**/*.ts", "plan-fixes/test/**/*.ts"]
+  "include": ["test/**/*.ts", "plan-fixes/test/**/*.ts", "issue-forensics/test/**/*.ts"]
 }
