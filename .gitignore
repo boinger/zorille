@@ -2,6 +2,7 @@ node_modules/
 dist/
 .DS_Store
 *.log
+INVESTIGATION/
 
 # CLAUDE.md is intentional project documentation for this Claude Code skill
 !CLAUDE.md

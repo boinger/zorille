@@ -296,13 +296,13 @@ describe("/issue-forensics v0.1.2 — disclosure-path check (Phase 5.5)", () => 
     expect(c).toMatch(/git rev-parse <short-sha>/);
   });
 
-  test("SKILL.md frontmatter version matches VERSION file (0.1.2)", () => {
+  test("SKILL.md frontmatter version matches VERSION file (0.1.3)", () => {
     const version = fs
       .readFileSync(path.join(SKILL_DIR, "VERSION"), "utf-8")
       .trim();
-    expect(version).toBe("0.1.2");
+    expect(version).toBe("0.1.3");
     const c = loadSkill();
-    expect(c).toMatch(/^version:\s*0\.1\.2\s*$/m);
+    expect(c).toMatch(/^version:\s*0\.1\.3\s*$/m);
   });
 });
 

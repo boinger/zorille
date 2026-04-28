@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.1.3] - 2026-04-27
+
+### Changed
+
+- **Pillar 5 grep discipline expanded** from 12 lines to per-language
+  structural checklists (C/C++, Go, Python, TS/JS). Detail lives in
+  the new lazy-loaded reference `references/pillar-5-grep-discipline.md`;
+  SKILL.md keeps the two-phase framing (find vs reason about context),
+  GATE ASSERTION, N/A rendering, and a one-line trigger pointing at
+  the reference.
+- **No behavior change visible to the user** — same skill, same flags,
+  same output shape; the improvement is internal grep discipline
+  applied during Pillar 5.
+
+### Added
+
+- **`references/pillar-5-grep-discipline.md`** — lazy-loaded reference
+  with per-language structural-feature checklists (C/C++ anonymous
+  namespaces, vtable dispatch, macro expansion, callback tables; Go
+  interface satisfaction, package-qualified calls, method values;
+  Python MRO, decorators, metaclass dispatch; TS/JS overload
+  resolution, re-exports, default exports, dynamic imports); plus
+  cross-cutting patterns (generated code, test fixtures); plus
+  call-site context-reading framing (concurrency, lifetime, polarity,
+  trust shape); plus tool escape hatches (scip-clang, scip-go,
+  scip-typescript, scip-python, ast-grep, clangd) documented as
+  explicit non-default escape hatches with documented usage criteria
+  and scratchpad logging requirements.
+
+### Context
+
+Motivated by an investigation of graph-vs-grep for Pillar 5 caller
+traces — see `references/decisions/2026-04-graph-investigation.md`.
+The full corpus (3 investigations: 2 Prusa C++, 1 Loki Go) showed
+grep with discipline was sufficient for every Pillar 5 trace. Tool
+augmentations (scip-*, ast-grep, clangd) are documented as escape
+hatches for future Type-B (structural / indirect) failures rather
+than defaults. The graph-tool project was evaluated and rejected in
+favor of this discipline expansion.
+
 ## [0.1.2] - 2026-04-15
 
 ### Added

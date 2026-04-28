@@ -1,6 +1,6 @@
 ---
 name: issue-forensics
-version: 0.1.2
+version: 0.1.3
 description: |
   Apply investigative rigor to non-trivial external-contribution findings
   before drafting an upstream issue or PR. Four-question entry gate routes
@@ -336,10 +336,34 @@ The point is to catch security shape BEFORE the user invests another 15-30 min i
 
 Enumerate every production call site you can find, with permalinks. The goal is to confirm or deny the scenarios where the problematic behavior could fire.
 
-Concrete operations:
-- `grep` for the function name (tight if it's unique, looser if it's common like `Run`).
-- Language-aware: Go package-qualified `pkg.FuncName`, Python `from x import FuncName`, TypeScript/JavaScript import traces.
-- `gh search` for usages in other repos if the symbol is public API and you suspect external consumers.
+**Two phases of work — keep them mentally separated:**
+
+1. **Find the call sites** (mostly grep work; usually the easier half)
+2. **Reason about each site's context** (concurrency, timing, dispatch polarity, lifetime, who the caller's caller is — investigator judgment, no tool produces this)
+
+Most Pillar 5 failures are in the second phase. A complete list of call sites that all read the same way to the LLM is *worse* than a shorter list with annotated context. When in doubt, fewer sites with clearer context wins.
+
+#### Finding call sites — base technique
+
+- `grep` / `rg` for the function name (tight if it's unique, looser if it's common like `Run`).
+- `gh search code` for usages in other repos if the symbol is public API and you suspect external consumers.
+- Language-aware: Go package-qualified `pkg.FuncName`, Python `from x import FuncName`, TypeScript import traces.
+
+#### When to load the per-language reference
+
+Per-language structural-feature checklists (C/C++ macros / vtables / anonymous namespaces, Go interface satisfaction, Python MRO, TS overloads / re-exports) plus tool escape hatches (scip-\*, ast-grep, clangd) live at `references/pillar-5-grep-discipline.md`. **Do not load on every invocation** — load when:
+
+- Pillar 5's initial grep pass returns fewer callers than the disproof scenario implies (e.g., Pillar 4 surfaced 3 distinct failure modes but grep found only 1 caller — suspicious gap)
+- The target language has known structural-indirection patterns and the finding's correctness depends on caller exhaustiveness (C/C++ with macros or vtables, Go with widely-implemented interface methods, Python with metaclasses or dynamic dispatch)
+- An anonymous-namespace / closed-scope proof would let you assert exhaustiveness ("anonymous namespace, search is closed to this TU") and the symbol is a candidate for that
+
+The reference also documents the tool escape hatches (scip-clang, scip-go, ast-grep, etc.) as **explicit non-defaults** — use only when the per-language checklist has been exhausted, the trace is still incomplete, and the missing calls are structural rather than string-findable. If you reach for these tools, log the reason and friction in the scratchpad — accumulated escape-hatch invocations across investigations is the signal for whether to revisit the (currently rejected) graph-tool approach.
+
+#### Reasoning about each call site (the harder half)
+
+Once you have the candidate caller set, annotate each: concurrency context (goroutine? errgroup? ISR? serialized?), lifetime/freshness (fresh instance per call vs reused?), polarity (`if X` vs `if !X` — same callee, opposite control flow), trust shape (input from peer/internal vs user/network?). These annotations are what makes Pillar 5 evidence vs. a list.
+
+The Loki #21524 exemplar's Pillar 5 (`references/loki-21524.md`, "Why no production caller hits any of these races" section) is the model: each of 5+ caller pathways is annotated with concurrency context, freshness, and lifetime.
 
 **GATE ASSERTION: the caller trace MUST admit its own limits.** Phrase earned humility explicitly: "If there's a caller I missed — especially one where `<the problematic sharing pattern>` is genuinely present — I'd want to hear about it." Fake exhaustiveness (claiming to have traced all callers when you can't verify external consumers) is a fail.
 
@@ -374,6 +398,7 @@ POLICY_URL=$(gh api repos/<owner>/<repo>/community/profile \
 
 # If null, fall through to file probes (some repos have SECURITY.md
 # without registering it via the community profile UI):
+```
 if [ -z "$POLICY_URL" ] || [ "$POLICY_URL" = "null" ]; then
   # Try .github/SECURITY.md
   gh api repos/<owner>/<repo>/contents/.github/SECURITY.md \
